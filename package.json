@@ -3,7 +3,7 @@
     "displayName": "Helm Values Preview",
     "description": "Preview resolved Helm template values with inlay hints and values file selection",
     "version": "0.0.1",
-    "publisher": "beeemt",
+    "publisher": "beeemT",
     "engines": {
         "vscode": "^1.85.0"
     },
