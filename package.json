@@ -1,6 +1,6 @@
 {
     "name": "vscode-helm-values",
-    "displayName": "Helm Values Preview",
+    "displayName": "Helm Values",
     "description": "Preview resolved Helm template values with inlay hints and values file selection",
     "version": "0.0.1",
     "publisher": "beeemT",
