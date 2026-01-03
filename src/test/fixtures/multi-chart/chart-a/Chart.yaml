@@ -1,0 +1,5 @@
+apiVersion: v2
+name: chart-a
+description: Chart A for multi-chart testing
+type: application
+version: 0.1.0

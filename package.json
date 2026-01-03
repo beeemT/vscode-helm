@@ -1,0 +1,86 @@
+{
+    "name": "vscode-helm-values",
+    "displayName": "Helm Values Preview",
+    "description": "Preview resolved Helm template values with inlay hints and values file selection",
+    "version": "0.0.1",
+    "publisher": "beeemt",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Other"
+    ],
+    "keywords": [
+        "helm",
+        "kubernetes",
+        "yaml",
+        "values",
+        "templates"
+    ],
+    "activationEvents": [
+        "workspaceContains:**/Chart.yaml",
+        "onLanguage:yaml"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "helmValues.selectValuesFile",
+                "title": "Helm: Select Values File"
+            },
+            {
+                "command": "helmValues.clearValuesFile",
+                "title": "Helm: Clear Values File Selection"
+            },
+            {
+                "command": "helmValues.goToValueDefinition",
+                "title": "Helm: Go to Value Definition"
+            }
+        ],
+        "configuration": {
+            "title": "Helm Values",
+            "properties": {
+                "helmValues.enableInlayHints": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable inlay hints for Helm template values"
+                },
+                "helmValues.inlayHintMaxLength": {
+                    "type": "number",
+                    "default": 50,
+                    "description": "Maximum length of inlay hint text before truncation"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile",
+        "test": "vscode-test",
+        "lint": "eslint src --ext ts",
+        "format": "prettier --write \"src/**/*.ts\""
+    },
+    "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "@types/mocha": "^10.0.6",
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "@typescript-eslint/eslint-plugin": "^6.19.0",
+        "@typescript-eslint/parser": "^6.19.0",
+        "@vscode/test-cli": "^0.0.4",
+        "@vscode/test-electron": "^2.3.8",
+        "eslint": "^8.56.0",
+        "prettier": "^3.2.4",
+        "typescript": "^5.3.3"
+    },
+    "dependencies": {
+        "js-yaml": "^4.1.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/beeemt/vscode-helm"
+    }
+}

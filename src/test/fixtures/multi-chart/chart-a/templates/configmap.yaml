@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}
+data:
+  port: "{{ .Values.port }}"
+  port2: "{{ .Values.port }}"

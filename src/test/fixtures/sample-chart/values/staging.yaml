@@ -1,0 +1,9 @@
+# Staging values in subdirectory
+replicaCount: 2
+
+image:
+  tag: "staging"
+
+global:
+  environment: staging
+  debug: true

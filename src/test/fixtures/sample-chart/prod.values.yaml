@@ -1,0 +1,6 @@
+# Alternative naming pattern: prod.values.yaml
+replicaCount: 5
+
+image:
+  repository: nginx-prod
+  tag: "stable"

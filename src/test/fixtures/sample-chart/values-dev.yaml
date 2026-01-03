@@ -1,0 +1,9 @@
+# Development values override
+replicaCount: 1
+
+image:
+  pullPolicy: Always
+
+global:
+  environment: development
+  debug: true
