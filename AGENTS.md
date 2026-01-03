@@ -6,6 +6,7 @@ VS Code extension for Helm chart development. Provides:
 - Status bar dropdown for selecting values override files
 - Text decorations showing resolved template values
 - Go-to-definition for value sources (Cmd/Ctrl+Click)
+- Find all references from values files to templates
 - Hover tooltips on decorations with value details
 
 TypeScript-based VS Code extension using `js-yaml` for YAML parsing.
@@ -73,6 +74,7 @@ src/
 │   ├── valuesDecorationProvider.ts # Text decorations for .Values references
 │   ├── decorationHoverProvider.ts  # Hover tooltips for decorations
 │   ├── definitionProvider.ts       # Go-to-definition (Cmd/Ctrl+Click)
+│   ├── referenceProvider.ts        # Find all references from values files
 │   └── statusBarProvider.ts        # Status bar values file selector
 ├── services/
 │   ├── helmChartService.ts         # Chart detection + values discovery

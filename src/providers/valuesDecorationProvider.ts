@@ -77,7 +77,6 @@ export class ValuesDecorationProvider {
    * Refresh decorations for all visible Helm template editors
    */
   public async refresh(): Promise<void> {
-    console.log('[Decorations] refresh() called');
     const helmService = HelmChartService.getInstance();
 
     for (const editor of vscode.window.visibleTextEditors) {
@@ -112,7 +111,6 @@ export class ValuesDecorationProvider {
     // Get the selected values file
     const statusBarProvider = StatusBarProvider.getInstance();
     const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
-    console.log(`[Decorations] updateDecorations for ${editor.document.uri.fsPath}, selectedFile: "${selectedFile}"`);
 
     // Get merged values
     const valuesCache = ValuesCache.getInstance();
@@ -159,7 +157,6 @@ export class ValuesDecorationProvider {
       });
     }
 
-    console.log(`[Decorations] Setting ${decorations.length} decorations`);
     editor.setDecorations(this.decorationType, decorations);
   }
 

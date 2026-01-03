@@ -54,16 +54,11 @@ export class ValuesCache {
     const cacheKey = chartRoot;
     const cached = this.cache.get(cacheKey);
 
-    console.log(`[ValuesCache] getValues called - chartRoot: ${chartRoot}, selectedFile: ${selectedOverrideFile}`);
-    console.log(`[ValuesCache] cached exists: ${!!cached}, cached.selectedOverrideFile: ${cached?.selectedOverrideFile}`);
-
     // Return cached values if override file hasn't changed
     if (cached && cached.selectedOverrideFile === selectedOverrideFile) {
-      console.log(`[ValuesCache] Returning cached values`);
       return cached.merged;
     }
 
-    console.log(`[ValuesCache] Loading fresh values`);
     // Load and cache values
     return this.loadValues(chartRoot, selectedOverrideFile);
   }
@@ -256,15 +251,12 @@ export class ValuesCache {
    * Immediately invalidate cache without debouncing
    */
   public invalidateCacheImmediate(chartRoot: string): void {
-    console.log(`[ValuesCache] invalidateCacheImmediate called for: ${chartRoot}`);
-    console.log(`[ValuesCache] Cache has key: ${this.cache.has(chartRoot)}`);
     const existingTimer = this.debounceTimers.get(chartRoot);
     if (existingTimer) {
       clearTimeout(existingTimer);
       this.debounceTimers.delete(chartRoot);
     }
     this.cache.delete(chartRoot);
-    console.log(`[ValuesCache] Cache deleted, now has key: ${this.cache.has(chartRoot)}`);
   }
 
   /**

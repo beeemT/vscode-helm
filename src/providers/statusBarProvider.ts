@@ -121,13 +121,20 @@ export class StatusBarProvider {
    * Show the QuickPick for selecting a values file
    */
   private async showValuesFilePicker(): Promise<void> {
-    if (!this.currentChartContext) {
-      vscode.window.showWarningMessage('No Helm chart detected in current file');
-      return;
+    let chartContext = this.currentChartContext;
+
+    // If no current chart context, try to find charts in workspace
+    if (!chartContext) {
+      chartContext = await this.promptForChartSelection();
+      if (!chartContext) {
+        return;
+      }
+      // Update current context for subsequent operations
+      this.currentChartContext = chartContext;
     }
 
     const helmService = HelmChartService.getInstance();
-    const valuesFiles = await helmService.findValuesFiles(this.currentChartContext.chartRoot);
+    const valuesFiles = await helmService.findValuesFiles(chartContext.chartRoot);
 
     if (valuesFiles.length === 0) {
       vscode.window.showInformationMessage('No values override files found in chart');
@@ -146,7 +153,7 @@ export class StatusBarProvider {
 
     // Add values files
     for (const file of valuesFiles) {
-      const relativePath = path.relative(this.currentChartContext.chartRoot, file);
+      const relativePath = path.relative(chartContext.chartRoot, file);
       items.push({
         label: `$(file) ${path.basename(file)}`,
         description: relativePath !== path.basename(file) ? relativePath : undefined,
@@ -162,8 +169,52 @@ export class StatusBarProvider {
 
     if (selected) {
       const selectedFile = selected.label.startsWith('$(x)') ? '' : selected.detail || '';
-      await this.setSelectedFile(this.currentChartContext.chartRoot, selectedFile);
+      await this.setSelectedFile(chartContext.chartRoot, selectedFile);
     }
+  }
+
+  /**
+   * Prompt user to select a Helm chart from the workspace
+   */
+  private async promptForChartSelection(): Promise<HelmChartContext | undefined> {
+    const helmService = HelmChartService.getInstance();
+    const charts = await helmService.findAllChartsInWorkspace();
+
+    if (charts.length === 0) {
+      vscode.window.showWarningMessage('No Helm charts found in workspace');
+      return undefined;
+    }
+
+    // If only one chart, use it directly
+    if (charts.length === 1) {
+      return charts[0];
+    }
+
+    // Multiple charts - prompt user to select one
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    const workspaceRoot = workspaceFolders?.[0]?.uri.fsPath || '';
+
+    const items: vscode.QuickPickItem[] = charts.map((chart) => {
+      const relativePath = workspaceRoot
+        ? path.relative(workspaceRoot, chart.chartRoot)
+        : chart.chartRoot;
+      return {
+        label: `$(package) ${path.basename(chart.chartRoot)}`,
+        description: relativePath,
+        detail: chart.chartRoot,
+      };
+    });
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select a Helm chart',
+      matchOnDescription: true,
+    });
+
+    if (!selected) {
+      return undefined;
+    }
+
+    return charts.find((c) => c.chartRoot === selected.detail);
   }
 
   /**
@@ -181,16 +232,13 @@ export class StatusBarProvider {
   public getSelectedFile(chartRoot: string): string {
     // Check local cache first for immediate access (handles empty string correctly)
     if (this.selectedFilesCache.has(chartRoot)) {
-      const cached = this.selectedFilesCache.get(chartRoot)!;
-      console.log(`[StatusBar] getSelectedFile from local cache: ${chartRoot} -> "${cached}"`);
-      return cached;
+      return this.selectedFilesCache.get(chartRoot)!;
     }
     // Fall back to workspace state (initial load)
     const stateKey = this.getStateKey(chartRoot);
     const fromState = this.context.workspaceState.get<string>(stateKey, '');
     // Populate local cache
     this.selectedFilesCache.set(chartRoot, fromState);
-    console.log(`[StatusBar] getSelectedFile from workspace state: ${chartRoot} -> "${fromState}"`);
     return fromState;
   }
 
@@ -198,12 +246,10 @@ export class StatusBarProvider {
    * Set the selected values file for a chart
    */
   public async setSelectedFile(chartRoot: string, filePath: string): Promise<void> {
-    console.log(`[StatusBar] setSelectedFile: ${chartRoot} -> "${filePath}"`);
     const stateKey = this.getStateKey(chartRoot);
 
     // Update local cache immediately (synchronous)
     this.selectedFilesCache.set(chartRoot, filePath);
-    console.log(`[StatusBar] Local cache updated`);
 
     // Invalidate values cache BEFORE persisting to ensure fresh data on next request
     const valuesCache = ValuesCache.getInstance();
@@ -218,7 +264,6 @@ export class StatusBarProvider {
     // Notify listeners after a microtask to ensure all state is settled
     // This helps VS Code's inlay hints system pick up the new value
     await Promise.resolve();
-    console.log(`[StatusBar] Firing onSelectionChanged event`);
     this.onSelectionChangedEmitter.fire(chartRoot);
   }
 

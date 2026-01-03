@@ -66,7 +66,8 @@ suite('HelmDefinitionProvider', () => {
       valuesPath,
       'Should point to values.yaml'
     );
-    assert.strictEqual(location.range.start.line, 2, 'Should point to correct line');
+    // replicaCount is on line 2 (0-indexed line 1)
+    assert.strictEqual(location.range.start.line, 1, 'Should point to correct line');
   });
 
   test('returns location for nested .Values reference', async () => {

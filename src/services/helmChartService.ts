@@ -181,4 +181,30 @@ export class HelmChartService {
     const content = await vscode.workspace.fs.readFile(uri);
     return Buffer.from(content).toString('utf-8');
   }
+
+  /**
+   * Find all Helm charts in the workspace.
+   * Returns an array of HelmChartContext for each chart found.
+   */
+  public async findAllChartsInWorkspace(): Promise<HelmChartContext[]> {
+    const charts: HelmChartContext[] = [];
+
+    // Find all Chart.yaml files in the workspace
+    const chartYamlFiles = await vscode.workspace.findFiles('**/Chart.yaml', '**/node_modules/**');
+
+    for (const chartYamlUri of chartYamlFiles) {
+      const chartRoot = path.dirname(chartYamlUri.fsPath);
+      const valuesYamlPath = path.join(chartRoot, 'values.yaml');
+      const valuesOverrideFiles = await this.findValuesFiles(chartRoot);
+
+      charts.push({
+        chartRoot,
+        chartYamlPath: chartYamlUri.fsPath,
+        valuesYamlPath,
+        valuesOverrideFiles,
+      });
+    }
+
+    return charts.sort((a, b) => a.chartRoot.localeCompare(b.chartRoot));
+  }
 }

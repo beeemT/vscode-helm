@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { HelmDecorationHoverProvider } from './providers/decorationHoverProvider';
 import { HelmDefinitionProvider } from './providers/definitionProvider';
+import { HelmReferenceProvider } from './providers/referenceProvider';
 import { StatusBarProvider } from './providers/statusBarProvider';
 import { ValuesDecorationProvider } from './providers/valuesDecorationProvider';
 import { FileWatcher } from './services/fileWatcher';
@@ -59,6 +60,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerDefinitionProvider(
       { language: 'helm', pattern: '**/templates/**' },
       definitionProvider
+    )
+  );
+
+  // Register reference provider for "Find All References" from values files
+  // This enables finding all template usages of a value key
+  const referenceProvider = HelmReferenceProvider.getInstance();
+  context.subscriptions.push(
+    vscode.languages.registerReferenceProvider(
+      { language: 'yaml', pattern: '**/values*.{yaml,yml}' },
+      referenceProvider
+    ),
+    vscode.languages.registerReferenceProvider(
+      { language: 'yaml', pattern: '**/*.values.{yaml,yml}' },
+      referenceProvider
+    ),
+    vscode.languages.registerReferenceProvider(
+      { language: 'yaml', pattern: '**/*-values.{yaml,yml}' },
+      referenceProvider
+    ),
+    vscode.languages.registerReferenceProvider(
+      { language: 'yaml', pattern: '**/values/*.{yaml,yml}' },
+      referenceProvider
     )
   );
 

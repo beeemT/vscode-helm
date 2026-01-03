@@ -27,17 +27,36 @@
         "commands": [
             {
                 "command": "helmValues.selectValuesFile",
-                "title": "Helm: Select Values File"
+                "title": "Select Values File",
+                "category": "Helm"
             },
             {
                 "command": "helmValues.clearValuesFile",
-                "title": "Helm: Clear Values File Selection"
+                "title": "Clear Values File Selection",
+                "category": "Helm"
             },
             {
                 "command": "helmValues.goToValueDefinition",
-                "title": "Helm: Go to Value Definition"
+                "title": "Go to Value Definition",
+                "category": "Helm"
             }
         ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "helmValues.selectValuesFile",
+                    "when": "workspaceFolderCount > 0"
+                },
+                {
+                    "command": "helmValues.clearValuesFile",
+                    "when": "workspaceFolderCount > 0"
+                },
+                {
+                    "command": "helmValues.goToValueDefinition",
+                    "when": "false"
+                }
+            ]
+        },
         "configuration": {
             "title": "Helm Values",
             "properties": {
