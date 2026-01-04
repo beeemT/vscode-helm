@@ -14,6 +14,28 @@ export interface HelmChartContext {
   valuesYamlPath: string;
   /** List of absolute paths to values override files */
   valuesOverrideFiles: string[];
+  /** Whether this chart is a subchart (inside another chart's charts/ directory) */
+  isSubchart: boolean;
+  /** If subchart, the alias or name used to reference it from the parent */
+  subchartName?: string;
+  /** If subchart, the parent chart context */
+  parentChart?: HelmChartContext;
+  /** Discovered subcharts in this chart's charts/ directory */
+  subcharts: SubchartInfo[];
+}
+
+/**
+ * Information about a subchart discovered in charts/ directory
+ */
+export interface SubchartInfo {
+  /** The directory name of the subchart */
+  name: string;
+  /** Alias from Chart.yaml dependencies (if any) */
+  alias?: string;
+  /** Absolute path to the subchart root */
+  chartRoot: string;
+  /** Condition expression from Chart.yaml (if any) */
+  condition?: string;
 }
 
 /**
@@ -35,6 +57,7 @@ export interface ChartMetadata {
     repository?: string;
     condition?: string;
     tags?: string[];
+    alias?: string;
   }>;
   maintainers?: Array<{
     name: string;
@@ -78,6 +101,7 @@ export class HelmChartService {
   /**
    * Detect the Helm chart context for a given file URI.
    * Walks up the directory tree looking for Chart.yaml.
+   * Also detects if the chart is a subchart of a parent chart.
    */
   public async detectHelmChart(fileUri: vscode.Uri): Promise<HelmChartContext | undefined> {
     let currentDir = path.dirname(fileUri.fsPath);
@@ -95,12 +119,24 @@ export class HelmChartService {
         const valuesYamlPath = path.join(currentDir, 'values.yaml');
         const valuesOverrideFiles = await this.findValuesFiles(currentDir);
 
-        return {
+        // Check if this chart is a subchart (inside another chart's charts/ directory)
+        const subchartInfo = await this.detectSubchartContext(currentDir, workspaceRoot);
+
+        // Discover subcharts in this chart's charts/ directory
+        const subcharts = await this.discoverSubcharts(currentDir);
+
+        const context: HelmChartContext = {
           chartRoot: currentDir,
           chartYamlPath,
           valuesYamlPath,
           valuesOverrideFiles,
+          isSubchart: subchartInfo.isSubchart,
+          subchartName: subchartInfo.subchartName,
+          parentChart: subchartInfo.parentChart,
+          subcharts,
         };
+
+        return context;
       } catch {
         // Chart.yaml not found, go up one level
         const parentDir = path.dirname(currentDir);
@@ -120,6 +156,150 @@ export class HelmChartService {
     }
 
     return undefined;
+  }
+
+  /**
+   * Check if a chart directory is a subchart (inside another chart's charts/ directory).
+   * Returns subchart context info including parent chart if found.
+   */
+  private async detectSubchartContext(
+    chartRoot: string,
+    _workspaceRoot: string | undefined
+  ): Promise<{
+    isSubchart: boolean;
+    subchartName?: string;
+    parentChart?: HelmChartContext;
+  }> {
+    const parentDir = path.dirname(chartRoot);
+    const dirName = path.basename(parentDir);
+
+    // Check if immediate parent directory is named "charts"
+    if (dirName !== 'charts') {
+      return { isSubchart: false };
+    }
+
+    // Look for parent Chart.yaml one level up from charts/
+    const potentialParentRoot = path.dirname(parentDir);
+    const potentialParentChartYaml = path.join(potentialParentRoot, 'Chart.yaml');
+
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(potentialParentChartYaml));
+
+      // Found parent chart - get the subchart name (could be aliased)
+      const subchartDirName = path.basename(chartRoot);
+      const subchartName = await this.resolveSubchartName(potentialParentRoot, subchartDirName);
+
+      // Build parent context (non-recursive to avoid infinite loops)
+      const parentValuesYamlPath = path.join(potentialParentRoot, 'values.yaml');
+      const parentValuesOverrideFiles = await this.findValuesFiles(potentialParentRoot);
+      const parentSubcharts = await this.discoverSubcharts(potentialParentRoot);
+
+      // Check if parent is also a subchart (but don't recurse further for now)
+      const parentContext: HelmChartContext = {
+        chartRoot: potentialParentRoot,
+        chartYamlPath: potentialParentChartYaml,
+        valuesYamlPath: parentValuesYamlPath,
+        valuesOverrideFiles: parentValuesOverrideFiles,
+        isSubchart: false, // We don't support nested subcharts yet
+        subcharts: parentSubcharts,
+      };
+
+      return {
+        isSubchart: true,
+        subchartName,
+        parentChart: parentContext,
+      };
+    } catch {
+      // No parent Chart.yaml found
+      return { isSubchart: false };
+    }
+  }
+
+  /**
+   * Resolve the subchart name by checking if the parent Chart.yaml has an alias for it.
+   * Returns the alias if found, otherwise the directory name.
+   */
+  private async resolveSubchartName(parentChartRoot: string, subchartDirName: string): Promise<string> {
+    try {
+      const chartYamlPath = path.join(parentChartRoot, 'Chart.yaml');
+      const content = await this.readFileContents(chartYamlPath);
+      const chartMetadata = yaml.load(content) as ChartMetadata;
+
+      if (chartMetadata.dependencies) {
+        // Find a dependency that matches this subchart directory
+        for (const dep of chartMetadata.dependencies) {
+          // The directory name is typically the dependency name (after download)
+          // but could also be the alias if one was defined
+          if (dep.name === subchartDirName || dep.alias === subchartDirName) {
+            // Return alias if available, otherwise the name
+            return dep.alias || dep.name;
+          }
+        }
+      }
+    } catch {
+      // Ignore errors reading Chart.yaml
+    }
+
+    // Default to directory name
+    return subchartDirName;
+  }
+
+  /**
+   * Discover subcharts in the charts/ directory of a chart.
+   * Only discovers expanded directories (not .tgz archives).
+   */
+  public async discoverSubcharts(chartRoot: string): Promise<SubchartInfo[]> {
+    const subcharts: SubchartInfo[] = [];
+    const chartsDir = path.join(chartRoot, 'charts');
+
+    // Check if charts/ directory exists
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(chartsDir));
+    } catch {
+      return subcharts;
+    }
+
+    // Read dependencies from Chart.yaml for alias mapping
+    let dependencies: ChartMetadata['dependencies'] = [];
+    try {
+      const chartYamlPath = path.join(chartRoot, 'Chart.yaml');
+      const content = await this.readFileContents(chartYamlPath);
+      const chartMetadata = yaml.load(content) as ChartMetadata;
+      dependencies = chartMetadata.dependencies || [];
+    } catch {
+      // Continue without dependency info
+    }
+
+    // Find all Chart.yaml files in charts/*/
+    const pattern = new vscode.RelativePattern(chartsDir, '*/Chart.yaml');
+    const chartFiles = await vscode.workspace.findFiles(pattern);
+
+    for (const chartFile of chartFiles) {
+      const subchartRoot = path.dirname(chartFile.fsPath);
+      const subchartDirName = path.basename(subchartRoot);
+
+      // Find matching dependency for alias and condition
+      const matchingDep = dependencies.find(
+        (dep) => dep.name === subchartDirName || dep.alias === subchartDirName
+      );
+
+      subcharts.push({
+        name: subchartDirName,
+        alias: matchingDep?.alias,
+        chartRoot: subchartRoot,
+        condition: matchingDep?.condition,
+      });
+    }
+
+    return subcharts.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Get the effective name to use for accessing subchart values in the parent's values.yaml.
+   * This is the alias if defined, otherwise the dependency name.
+   */
+  public getSubchartValuesKey(subchart: SubchartInfo): string {
+    return subchart.alias || subchart.name;
   }
 
   /**
@@ -286,8 +466,7 @@ export class HelmChartService {
    * In a real Helm deployment, these values come from the release context.
    * Here we provide placeholder values to show what would be available.
    */
-  public getReleaseInfo(chartRoot: string): ReleaseInfo {
-    const chartName = path.basename(chartRoot);
+  public getReleaseInfo(_chartRoot: string): ReleaseInfo {
     return {
       Name: `<release-name>`,
       Namespace: `<namespace>`,
@@ -343,16 +522,11 @@ export class HelmChartService {
     const chartYamlFiles = await vscode.workspace.findFiles('**/Chart.yaml', '**/node_modules/**');
 
     for (const chartYamlUri of chartYamlFiles) {
-      const chartRoot = path.dirname(chartYamlUri.fsPath);
-      const valuesYamlPath = path.join(chartRoot, 'values.yaml');
-      const valuesOverrideFiles = await this.findValuesFiles(chartRoot);
-
-      charts.push({
-        chartRoot,
-        chartYamlPath: chartYamlUri.fsPath,
-        valuesYamlPath,
-        valuesOverrideFiles,
-      });
+      // Use detectHelmChart to get full context including subchart info
+      const chartContext = await this.detectHelmChart(chartYamlUri);
+      if (chartContext) {
+        charts.push(chartContext);
+      }
     }
 
     return charts.sort((a, b) => a.chartRoot.localeCompare(b.chartRoot));

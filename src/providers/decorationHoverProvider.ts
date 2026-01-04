@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { HelmChartService } from '../services/helmChartService';
+import { HelmChartContext, HelmChartService } from '../services/helmChartService';
 import { TemplateParser, TemplateReference } from '../services/templateParser';
 import { ValuesCache } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
@@ -60,8 +60,12 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     // Get the selected values file (for .Values)
+    // For subcharts, we need to use the parent chart's selected file
     const statusBarProvider = StatusBarProvider.getInstance();
-    const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
+    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
+      ? chartContext.parentChart.chartRoot
+      : chartContext.chartRoot;
+    const selectedFile = statusBarProvider?.getSelectedFile(effectiveChartRoot) || '';
 
     // Get max length from config
     const config = vscode.workspace.getConfiguration('helmValues');
@@ -75,10 +79,21 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
 
     switch (reference.objectType) {
       case 'Values': {
-        const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+        // For subcharts, get values as the subchart would see them
+        let values: Record<string, unknown>;
+        if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+          values = await valuesCache.getValuesForSubchart(
+            chartContext.parentChart.chartRoot,
+            chartContext.chartRoot,
+            chartContext.subchartName,
+            selectedFile
+          );
+        } else {
+          values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+        }
         resolvedValue = valuesCache.resolveValuePath(values, reference.path);
         sourceDescription = await this.getValuesSourceDescription(
-          chartContext.chartRoot,
+          chartContext,
           selectedFile,
           reference,
           valuesCache,
@@ -134,7 +149,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       displayValue,
       sourceDescription,
       isUnset,
-      chartContext.chartRoot,
+      chartContext,
       selectedFile,
       helmService,
       valuesCache
@@ -148,28 +163,66 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
   }
 
   private async getValuesSourceDescription(
-    chartRoot: string,
+    chartContext: HelmChartContext,
     selectedFile: string,
     reference: TemplateReference,
     valuesCache: ValuesCache,
-    helmService: HelmChartService
+    _helmService: HelmChartService
   ): Promise<string> {
-    const valuePosition = await valuesCache.findValuePositionInChain(
-      chartRoot,
-      selectedFile,
-      reference.path
-    );
+    let valuePosition;
+
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      // For subcharts, find position in parent's values or subchart's own values
+      valuePosition = await valuesCache.findSubchartValuePositionInChain(
+        chartContext.parentChart.chartRoot,
+        chartContext.chartRoot,
+        chartContext.subchartName,
+        selectedFile,
+        reference.path
+      );
+    } else {
+      valuePosition = await valuesCache.findValuePositionInChain(
+        chartContext.chartRoot,
+        selectedFile,
+        reference.path
+      );
+    }
 
     if (!valuePosition) {
       return '';
     }
 
     const fileName = path.basename(valuePosition.filePath);
+
+    // For subcharts, add context about where the value comes from
+    if (chartContext.isSubchart && chartContext.parentChart) {
+      const parentName = path.basename(chartContext.parentChart.chartRoot);
+      const subchartDirName = path.basename(chartContext.chartRoot);
+      // Use alias if different from directory name, otherwise just directory name
+      const subchartDisplayName = chartContext.subchartName && chartContext.subchartName !== subchartDirName
+        ? `${chartContext.subchartName} (${subchartDirName})`
+        : subchartDirName;
+
+      switch (valuePosition.source) {
+        case 'override':
+          return `\`${fileName}\` (parent chart \`${parentName}\`)`;
+        case 'parent-default':
+          return `\`${fileName}\` (parent chart \`${parentName}\`)`;
+        case 'default':
+          return `\`${fileName}\` (subchart \`${subchartDisplayName}\`)`;
+        case 'inline-default':
+          return 'inline default';
+      }
+    }
+
+    // For regular (non-subchart) charts, show chart name for clarity
+    const chartName = path.basename(chartContext.chartRoot);
     switch (valuePosition.source) {
       case 'override':
-        return `\`${fileName}\` (override)`;
+        return `\`${fileName}\` (chart \`${chartName}\`)`;
       case 'default':
-        return '`values.yaml`';
+      case 'parent-default':
+        return `\`${fileName}\` (chart \`${chartName}\`)`;
       case 'inline-default':
         return 'inline default';
     }
@@ -180,7 +233,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     displayValue: string,
     sourceDescription: string,
     isUnset: boolean,
-    chartRoot: string,
+    chartContext: HelmChartContext,
     selectedFile: string,
     helmService: HelmChartService,
     valuesCache: ValuesCache
@@ -191,11 +244,13 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       return this.buildValuesHoverContent(
         reference,
         displayValue,
+        sourceDescription,
         isUnset,
-        chartRoot,
+        chartContext.chartRoot,
         selectedFile,
         helmService,
-        valuesCache
+        valuesCache,
+        chartContext
       );
     }
 
@@ -220,11 +275,13 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
   private async buildValuesHoverContent(
     reference: TemplateReference,
     displayValue: string,
+    sourceDescription: string,
     isUnset: boolean,
     chartRoot: string,
     selectedFile: string,
     helmService: HelmChartService,
-    valuesCache: ValuesCache
+    valuesCache: ValuesCache,
+    chartContext: HelmChartContext
   ): Promise<vscode.MarkdownString> {
     const defaultValuesPath = await helmService.getDefaultValuesPath(chartRoot);
 
@@ -242,11 +299,23 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       return hoverContent;
     }
 
-    const valuePosition = await valuesCache.findValuePositionInChain(
-      chartRoot,
-      selectedFile,
-      reference.path
-    );
+    // Find value position using subchart-aware method
+    let valuePosition;
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      valuePosition = await valuesCache.findSubchartValuePositionInChain(
+        chartContext.parentChart.chartRoot,
+        chartContext.chartRoot,
+        chartContext.subchartName,
+        selectedFile,
+        reference.path
+      );
+    } else {
+      valuePosition = await valuesCache.findValuePositionInChain(
+        chartRoot,
+        selectedFile,
+        reference.path
+      );
+    }
 
     if (valuePosition) {
       const fileUri = vscode.Uri.file(valuePosition.filePath);
@@ -261,17 +330,11 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
           },
         ])
       );
-      const fileName = path.basename(valuePosition.filePath);
-      const sourceLabel = valuePosition.source === 'override'
-        ? `\`${fileName}\` (override)`
-        : valuePosition.source === 'default'
-          ? '`values.yaml`'
-          : 'inline default';
 
       const hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
-          `**Source:** ${sourceLabel}\n\n` +
+          `**Source:** ${sourceDescription}\n\n` +
           `[Go to definition](command:vscode.open?${args}) (or Cmd/Ctrl+Click on .Values reference)`
       );
       hoverContent.isTrusted = true;

@@ -18,9 +18,25 @@ interface CachedValues {
 }
 
 /**
- * Source of a resolved value
+ * Cached subchart values (merged from subchart defaults + parent overrides)
  */
-export type ValueSource = 'override' | 'default' | 'inline-default';
+interface CachedSubchartValues {
+  /** The merged values as the subchart would see them */
+  merged: Record<string, unknown>;
+  /** Timestamp of last update */
+  timestamp: number;
+  /** Parent's selected override file */
+  parentOverrideFile: string;
+}
+
+/**
+ * Source of a resolved value
+ * - 'override': Value from a selected override file
+ * - 'default': Value from the chart's own values.yaml
+ * - 'parent-default': Value from parent chart's values.yaml (for subcharts)
+ * - 'inline-default': Value from inline default in template
+ */
+export type ValueSource = 'override' | 'default' | 'parent-default' | 'inline-default';
 
 /**
  * Position of a value in a YAML file
@@ -39,6 +55,7 @@ export interface ValuePosition {
 export class ValuesCache {
   private static instance: ValuesCache;
   private cache: Map<string, CachedValues> = new Map();
+  private subchartCache: Map<string, CachedSubchartValues> = new Map();
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private readonly DEBOUNCE_MS = 300;
 
@@ -68,6 +85,72 @@ export class ValuesCache {
 
     // Load and cache values
     return this.loadValues(chartRoot, selectedOverrideFile);
+  }
+
+  /**
+   * Get values for a subchart as the subchart would see them.
+   * Follows Helm's merge behavior:
+   * 1. Start with subchart's own values.yaml defaults
+   * 2. Merge parent's values under the subchart key (alias or name)
+   * 3. Include global values from parent
+   *
+   * @param parentChartRoot Root of the parent chart
+   * @param subchartRoot Root of the subchart
+   * @param subchartKey The key used in parent's values.yaml (alias or name)
+   * @param parentOverrideFile Selected override file in parent chart
+   */
+  public async getValuesForSubchart(
+    parentChartRoot: string,
+    subchartRoot: string,
+    subchartKey: string,
+    parentOverrideFile: string
+  ): Promise<Record<string, unknown>> {
+    // Check subchart cache
+    const cacheKey = `${subchartRoot}:${parentOverrideFile}`;
+    const cached = this.subchartCache.get(cacheKey);
+    if (cached && cached.parentOverrideFile === parentOverrideFile) {
+      return cached.merged;
+    }
+
+    const helmService = HelmChartService.getInstance();
+
+    // 1. Load subchart's own default values
+    let subchartDefaults: Record<string, unknown> = {};
+    const subchartValuesPath = await helmService.getDefaultValuesPath(subchartRoot);
+    if (subchartValuesPath) {
+      try {
+        const content = await helmService.readFileContents(subchartValuesPath);
+        subchartDefaults = (yaml.load(content) as Record<string, unknown>) || {};
+      } catch (error) {
+        console.error(`Failed to parse subchart default values: ${error}`);
+      }
+    }
+
+    // 2. Get parent's merged values
+    const parentValues = await this.getValues(parentChartRoot, parentOverrideFile);
+
+    // 3. Extract values for this subchart from parent (under subchartKey)
+    const parentSubchartValues = (parentValues[subchartKey] as Record<string, unknown>) || {};
+
+    // 4. Extract global values from parent
+    const globalValues = (parentValues['global'] as Record<string, unknown>) || {};
+
+    // 5. Merge: subchart defaults <- parent subchart values
+    let merged = this.deepMerge(subchartDefaults, parentSubchartValues);
+
+    // 6. Add global values (they should be accessible as .Values.global in subchart)
+    if (Object.keys(globalValues).length > 0) {
+      merged = this.deepMerge(merged, { global: globalValues });
+    }
+
+    // Cache the result
+    this.subchartCache.set(cacheKey, {
+      merged,
+      timestamp: Date.now(),
+      parentOverrideFile,
+    });
+
+    return merged;
   }
 
   /**
@@ -238,6 +321,85 @@ export class ValuesCache {
   }
 
   /**
+   * Find the position of a subchart value in the chain:
+   * 1. Parent override file (under subchartKey.path)
+   * 2. Parent default values.yaml (under subchartKey.path)
+   * 3. For global.* paths: check parent files at root level (global.path)
+   * 4. Subchart's own values.yaml (under path)
+   */
+  public async findSubchartValuePositionInChain(
+    parentChartRoot: string,
+    subchartRoot: string,
+    subchartKey: string,
+    parentOverrideFile: string,
+    valuePath: string
+  ): Promise<ValuePosition | undefined> {
+    const helmService = HelmChartService.getInstance();
+
+    // The path in parent files is prefixed with subchart key
+    const parentValuePath = `${subchartKey}.${valuePath}`;
+
+    // Check parent override file first (under subchart key)
+    if (parentOverrideFile) {
+      const overridePos = await this.findValuePosition(
+        parentOverrideFile,
+        parentValuePath,
+        'override'
+      );
+      if (overridePos) {
+        return overridePos;
+      }
+    }
+
+    // Check parent default values.yaml (under subchart key)
+    const parentDefaultValuesPath = await helmService.getDefaultValuesPath(parentChartRoot);
+    if (parentDefaultValuesPath) {
+      const parentDefaultPos = await this.findValuePosition(
+        parentDefaultValuesPath,
+        parentValuePath,
+        'parent-default'
+      );
+      if (parentDefaultPos) {
+        return parentDefaultPos;
+      }
+    }
+
+    // For global.* paths, also check parent files at root level
+    // In Helm, global values are defined at root level in parent and passed to subcharts
+    if (valuePath.startsWith('global.')) {
+      if (parentOverrideFile) {
+        const globalOverridePos = await this.findValuePosition(
+          parentOverrideFile,
+          valuePath, // Use path as-is (global.xxx)
+          'override'
+        );
+        if (globalOverridePos) {
+          return globalOverridePos;
+        }
+      }
+
+      if (parentDefaultValuesPath) {
+        const globalDefaultPos = await this.findValuePosition(
+          parentDefaultValuesPath,
+          valuePath, // Use path as-is (global.xxx)
+          'parent-default'
+        );
+        if (globalDefaultPos) {
+          return globalDefaultPos;
+        }
+      }
+    }
+
+    // Fall back to subchart's own values.yaml
+    const subchartDefaultValuesPath = await helmService.getDefaultValuesPath(subchartRoot);
+    if (subchartDefaultValuesPath) {
+      return this.findValuePosition(subchartDefaultValuesPath, valuePath, 'default');
+    }
+
+    return undefined;
+  }
+
+  /**
    * Invalidate cache for a chart (with debouncing)
    */
   public invalidateCache(chartRoot: string): void {
@@ -250,6 +412,8 @@ export class ValuesCache {
     // Set new debounced invalidation
     const timer = setTimeout(() => {
       this.cache.delete(chartRoot);
+      // Also invalidate any subchart caches that depend on this chart
+      this.invalidateSubchartCaches(chartRoot);
       this.debounceTimers.delete(chartRoot);
     }, this.DEBOUNCE_MS);
 
@@ -266,6 +430,28 @@ export class ValuesCache {
       this.debounceTimers.delete(chartRoot);
     }
     this.cache.delete(chartRoot);
+    // Also invalidate any subchart caches that depend on this chart
+    this.invalidateSubchartCaches(chartRoot);
+  }
+
+  /**
+   * Invalidate subchart caches that might depend on a parent chart
+   */
+  private invalidateSubchartCaches(chartRoot: string): void {
+    // Invalidate subchart caches for subcharts of this chart
+    const chartsDir = chartRoot + '/charts/';
+    for (const key of this.subchartCache.keys()) {
+      // Key format is "subchartRoot:overrideFile"
+      if (key.includes(chartsDir)) {
+        this.subchartCache.delete(key);
+      }
+    }
+    // Also check if this chart is a subchart and invalidate its cache
+    for (const key of this.subchartCache.keys()) {
+      if (key.startsWith(chartRoot + ':')) {
+        this.subchartCache.delete(key);
+      }
+    }
   }
 
   /**
@@ -275,6 +461,7 @@ export class ValuesCache {
     this.debounceTimers.forEach((timer) => clearTimeout(timer));
     this.debounceTimers.clear();
     this.cache.clear();
+    this.subchartCache.clear();
   }
 
   /**

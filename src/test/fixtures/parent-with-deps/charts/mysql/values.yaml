@@ -1,0 +1,18 @@
+# MySQL subchart default values
+auth:
+  rootPassword: "default-mysql-root"
+  database: "default-db"
+  username: "default-user"
+
+primary:
+  resources:
+    limits:
+      memory: 256Mi
+      cpu: 250m
+    requests:
+      memory: 128Mi
+      cpu: 100m
+
+persistence:
+  enabled: true
+  size: 8Gi

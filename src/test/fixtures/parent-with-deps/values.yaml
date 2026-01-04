@@ -1,0 +1,27 @@
+# Parent chart values
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.21"
+
+global:
+  environment: production
+  region: us-east-1
+
+# Values passed to the database (aliased mysql) subchart
+database:
+  enabled: true
+  auth:
+    rootPassword: "parent-secret"
+    database: "myapp"
+  primary:
+    resources:
+      limits:
+        memory: 512Mi
+
+# Values passed to the redis subchart
+redis:
+  enabled: true
+  auth:
+    password: "redis-secret"

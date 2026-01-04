@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { HelmChartService } from '../services/helmChartService';
+import { HelmChartContext, HelmChartService } from '../services/helmChartService';
 import { TemplateParser, TemplateReference } from '../services/templateParser';
 import { ValuesCache } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
@@ -81,12 +81,27 @@ export class HelmInlayHintsProvider implements vscode.InlayHintsProvider {
     }
 
     // Get the selected values file
+    // For subcharts, we need to use the parent chart's selected file
     const statusBarProvider = StatusBarProvider.getInstance();
-    const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
+    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
+      ? chartContext.parentChart.chartRoot
+      : chartContext.chartRoot;
+    const selectedFile = statusBarProvider?.getSelectedFile(effectiveChartRoot) || '';
 
     // Get merged values
+    // For subcharts, get values as the subchart would see them
     const valuesCache = ValuesCache.getInstance();
-    const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+    let values: Record<string, unknown>;
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      values = await valuesCache.getValuesForSubchart(
+        chartContext.parentChart.chartRoot,
+        chartContext.chartRoot,
+        chartContext.subchartName,
+        selectedFile
+      );
+    } else {
+      values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+    }
 
     // Check for cancellation
     if (token.isCancellationRequested) {
@@ -131,7 +146,7 @@ export class HelmInlayHintsProvider implements vscode.InlayHintsProvider {
         endPosition,
         displayValue,
         ref,
-        chartContext.chartRoot,
+        chartContext,
         selectedFile
       );
 
@@ -148,17 +163,28 @@ export class HelmInlayHintsProvider implements vscode.InlayHintsProvider {
     position: vscode.Position,
     displayValue: string,
     ref: TemplateReference,
-    chartRoot: string,
+    chartContext: HelmChartContext,
     selectedFile: string
   ): Promise<vscode.InlayHint> {
     const valuesCache = ValuesCache.getInstance();
 
     // Find the position of the value definition
-    const valuePosition = await valuesCache.findValuePositionInChain(
-      chartRoot,
-      selectedFile,
-      ref.path
-    );
+    let valuePosition;
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      valuePosition = await valuesCache.findSubchartValuePositionInChain(
+        chartContext.parentChart.chartRoot,
+        chartContext.chartRoot,
+        chartContext.subchartName,
+        selectedFile,
+        ref.path
+      );
+    } else {
+      valuePosition = await valuesCache.findValuePositionInChain(
+        chartContext.chartRoot,
+        selectedFile,
+        ref.path
+      );
+    }
 
     // Create label part
     const labelPart = new vscode.InlayHintLabelPart(` = ${displayValue}`);

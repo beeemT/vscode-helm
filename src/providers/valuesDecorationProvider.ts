@@ -16,6 +16,10 @@ export interface UnsetValueReference {
   chartRoot: string;
   /** The path to values.yaml */
   valuesYamlPath: string;
+  /** If this is a subchart, the parent chart root */
+  parentChartRoot?: string;
+  /** If this is a subchart, the subchart key (alias or name) */
+  subchartKey?: string;
 }
 
 /**
@@ -146,12 +150,27 @@ export class ValuesDecorationProvider {
     }
 
     // Get the selected values file
+    // For subcharts, we need to use the parent chart's selected file
     const statusBarProvider = StatusBarProvider.getInstance();
-    const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
+    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
+      ? chartContext.parentChart.chartRoot
+      : chartContext.chartRoot;
+    const selectedFile = statusBarProvider?.getSelectedFile(effectiveChartRoot) || '';
 
     // Get merged values for .Values references
+    // For subcharts, get values as the subchart would see them
     const valuesCache = ValuesCache.getInstance();
-    const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+    let values: Record<string, unknown>;
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      values = await valuesCache.getValuesForSubchart(
+        chartContext.parentChart.chartRoot,
+        chartContext.chartRoot,
+        chartContext.subchartName,
+        selectedFile
+      );
+    } else {
+      values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+    }
 
     // Get Chart metadata for .Chart references
     const chartMetadata = await helmService.getChartMetadata(chartContext.chartRoot);
@@ -181,7 +200,18 @@ export class ValuesDecorationProvider {
     const documentUnsetRefs: UnsetValueReference[] = [];
 
     // Get the default values path for unset references
-    const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
+    // For subcharts, unset values should be created in the parent's values.yaml under the subchart key
+    let defaultValuesPath: string | undefined;
+    let unsetRefParentChartRoot: string | undefined;
+    let unsetRefSubchartKey: string | undefined;
+
+    if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
+      defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.parentChart.chartRoot);
+      unsetRefParentChartRoot = chartContext.parentChart.chartRoot;
+      unsetRefSubchartKey = chartContext.subchartName;
+    } else {
+      defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
+    }
 
     for (const ref of references) {
       // Create position at the end of the template expression for the decoration
@@ -239,6 +269,8 @@ export class ValuesDecorationProvider {
             range: fullRange,
             chartRoot: chartContext.chartRoot,
             valuesYamlPath: defaultValuesPath,
+            parentChartRoot: unsetRefParentChartRoot,
+            subchartKey: unsetRefSubchartKey,
           });
         }
       } else {

@@ -35,7 +35,51 @@ A VS Code extension that enhances working with Helm charts by providing:
 
 - Walks up directory tree from open file to find `Chart.yaml`
 - Identifies files within `templates/` directory as Helm templates
-- Root chart support only (subchart support deferred)
+- Detects subcharts in `charts/` directory with alias resolution
+
+### Subchart Support
+
+Subcharts (chart dependencies) in the `charts/` directory are fully supported:
+
+**Detection:**
+- Automatically detects when editing templates within a subchart
+- Resolves aliases from parent's `Chart.yaml` dependencies section
+- Builds parent chart context for value resolution
+
+**Value Resolution:**
+Following Helm's merge behavior:
+1. Subchart's own `values.yaml` defaults
+2. Parent chart values under the subchart key (alias or chart name)
+3. Global values from parent chart (`global:` section)
+
+**User Experience:**
+- Status bar shows subchart indicator: `📦 subchartName > 📄 values-file.yaml`
+- Values dropdown uses parent chart's values files
+- Go-to-definition navigates to correct source (parent override, parent default, or subchart default)
+
+**Example:**
+```yaml
+# Parent Chart.yaml
+dependencies:
+  - name: mysql
+    version: "1.0.0"
+    alias: database
+
+# Parent values.yaml
+database:
+  auth:
+    rootPassword: "parent-override"
+global:
+  environment: production
+```
+
+When editing `charts/mysql/templates/deployment.yaml`:
+- `.Values.auth.rootPassword` → `"parent-override"`
+- `.Values.global.environment` → `"production"`
+
+**Limitations:**
+- Only expanded directories supported (not `.tgz` archives)
+- Nested subcharts (subcharts within subcharts) not supported
 
 ### Values File Discovery
 
@@ -160,7 +204,8 @@ vscode-helm/
 
 ## Out of Scope (Deferred)
 
-- Subchart values support
+- Nested subcharts (subcharts within subcharts)
+- Subchart `.tgz` archives (only expanded directories supported)
 - URL-based values files (`helm install -f https://...`)
 - JSON values files
 - `with`/`range` block context tracking

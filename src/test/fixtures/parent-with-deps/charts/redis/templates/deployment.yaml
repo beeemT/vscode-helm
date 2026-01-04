@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-redis
+spec:
+  replicas: {{ .Values.replica.replicaCount }}
+  template:
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          resources:
+            limits:
+              memory: {{ .Values.master.resources.limits.memory }}
+          env:
+            - name: REDIS_PASSWORD
+              value: {{ .Values.auth.password }}
+            - name: ENVIRONMENT
+              value: {{ .Values.global.environment | default "development" }}

@@ -100,6 +100,27 @@ Standard Helm chart with various values file patterns:
 - `prod.values.yaml` - Alternative naming pattern
 - `values/staging.yaml` - Subdirectory pattern
 
+### multi-chart
+
+Multiple independent charts in one workspace:
+- `chart-a/` - First chart
+- `chart-b/` - Second chart
+
+### parent-with-deps
+
+Parent chart with subcharts for testing subchart value resolution:
+- `Chart.yaml` - Declares mysql (alias: database) and redis dependencies
+- `values.yaml` - Parent defaults with `database:` and `redis:` keys
+- `values-prod.yaml` - Production overrides
+- `charts/mysql/` - MySQL subchart with own values.yaml
+- `charts/redis/` - Redis subchart with own values.yaml
+
+Used for testing:
+- Subchart detection (`isSubchart`, `subchartName`)
+- Alias resolution (mysql→database)
+- Helm-style value merging
+- Go-to-definition across chart boundaries
+
 ### Template Files
 
 Template files in `templates/` contain various `.Values` patterns:

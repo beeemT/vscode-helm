@@ -5,6 +5,7 @@ A VS Code extension that enhances working with Helm charts by providing:
 - **Status bar values file selector** - Quickly switch between values override files
 - **Inlay hints** - See resolved template values inline in your template files
 - **Go-to-definition** - Click on inlay hints to jump to where values are defined
+- **Subchart support** - Works with Helm chart dependencies in `charts/` directory
 
 ## Features
 
@@ -19,6 +20,39 @@ A dropdown in the status bar lets you select which values override file to use. 
 When editing Helm template files, inlay hints display the resolved values for `.Values.x.y.z` expressions. Values are computed by deep-merging the default `values.yaml` with your selected override file.
 
 ![Inlay Hints](docs/inlay-hints.png)
+
+### Subchart Support
+
+The extension automatically detects when you're editing templates within a subchart (dependency) and resolves values correctly:
+
+- **Automatic detection**: Subcharts in the `charts/` directory are automatically detected
+- **Alias support**: Chart dependencies with aliases in `Chart.yaml` are properly resolved
+- **Helm-compatible value merging**: Values follow Helm's merge behavior:
+  1. Subchart's own `values.yaml` defaults
+  2. Parent chart values under the subchart key (alias or name)
+  3. Global values from parent (`global:` section)
+- **Status bar indicator**: Shows which subchart you're editing (e.g., `📦 database > 📄 values-prod.yaml`)
+- **Go-to-definition**: Navigates to value source in parent or subchart values files
+
+**Example**: If your parent chart has:
+```yaml
+# Chart.yaml
+dependencies:
+  - name: mysql
+    version: "1.0.0"
+    alias: database
+
+# values.yaml
+database:
+  auth:
+    rootPassword: "parent-secret"
+global:
+  environment: production
+```
+
+When editing `charts/mysql/templates/deployment.yaml`, `.Values.auth.rootPassword` resolves to `"parent-secret"` and `.Values.global.environment` resolves to `"production"`.
+
+**Note**: Only expanded subchart directories are supported, not `.tgz` archives. Nested subcharts (subcharts within subcharts) are not yet supported.
 
 ### Supported Patterns
 

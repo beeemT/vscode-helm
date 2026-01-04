@@ -195,3 +195,108 @@ suite('HelmReferenceProvider', () => {
     assert.strictEqual(result.length, 0, 'Should find no references');
   });
 });
+
+suite('HelmReferenceProvider - Global values in subcharts', () => {
+  const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+  const parentChartPath = path.join(fixturesPath, 'parent-with-deps');
+  const parentValuesPath = path.join(parentChartPath, 'values.yaml');
+  const subchartTemplatePath = path.join(parentChartPath, 'charts', 'mysql', 'templates', 'statefulset.yaml');
+
+  let parentValuesDocument: vscode.TextDocument;
+  let provider: HelmReferenceProvider;
+
+  suiteSetup(async () => {
+    HelmChartService.getInstance();
+    provider = HelmReferenceProvider.getInstance();
+    parentValuesDocument = await vscode.workspace.openTextDocument(parentValuesPath);
+  });
+
+  test('finds global.region references in subchart templates', async () => {
+    // Find the line with "region: us-east-1" under "global:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let regionLine = -1;
+    let foundGlobal = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('global:')) {
+        foundGlobal = true;
+      }
+      if (foundGlobal && lines[i].includes('region:')) {
+        regionLine = i;
+        break;
+      }
+    }
+    assert.ok(regionLine >= 0, 'Should find region line under global');
+
+    const position = new vscode.Position(regionLine, 4); // Position on "region"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in subchart template
+    const subchartRef = result.find((loc) => loc.uri.fsPath === subchartTemplatePath);
+    assert.ok(subchartRef, 'Should find reference in subchart statefulset.yaml');
+  });
+
+  test('finds global.environment references in subchart templates', async () => {
+    // Find the line with "environment: production" under "global:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let envLine = -1;
+    let foundGlobal = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('global:')) {
+        foundGlobal = true;
+      }
+      if (foundGlobal && lines[i].includes('environment:')) {
+        envLine = i;
+        break;
+      }
+    }
+    assert.ok(envLine >= 0, 'Should find environment line under global');
+
+    const position = new vscode.Position(envLine, 4); // Position on "environment"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in subchart template
+    const subchartRef = result.find((loc) => loc.uri.fsPath === subchartTemplatePath);
+    assert.ok(subchartRef, 'Should find reference in subchart statefulset.yaml');
+  });
+
+  test('finds global parent key references in all subchart templates', async () => {
+    // Find the line with "global:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let globalLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('global:')) {
+        globalLine = i;
+        break;
+      }
+    }
+    assert.ok(globalLine >= 0, 'Should find global line');
+
+    const position = new vscode.Position(globalLine, 2); // Position on "global"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    // Should find global.environment and global.region references in subchart
+    assert.ok(result.length >= 2, 'Should find multiple global references');
+  });
+});

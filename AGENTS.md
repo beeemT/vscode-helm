@@ -136,6 +136,48 @@ Default `values.yaml` is always used as base but excluded from selection.
 Template files may have language ID `yaml` or `helm` (when Helm extension is installed).
 All providers are registered for both languages.
 
+### Subchart Support Architecture
+
+The extension supports Helm subcharts (dependencies) in the `charts/` directory. This is implemented with the following design:
+
+**Subchart Detection (`detectSubchartContext`)**:
+1. When a chart is detected, check if its parent directory is named `charts`
+2. If so, look for `Chart.yaml` one level up to find parent chart
+3. Read parent's `Chart.yaml` dependencies to resolve aliases
+
+**SubchartInfo Interface**:
+```typescript
+interface SubchartInfo {
+  name: string;          // Directory name
+  alias?: string;        // Alias from Chart.yaml dependencies
+  chartRoot: string;     // Absolute path to subchart
+  condition?: string;    // Condition expression from dependencies
+}
+```
+
+**Value Resolution for Subcharts (`getValuesForSubchart`)**:
+Follows Helm's merge behavior:
+1. Start with subchart's own `values.yaml` defaults
+2. Merge parent's values under the subchart key (alias or name)
+3. Include `global` values from parent chart
+
+**Key Design Decisions**:
+- **Parent Chart Drives State**: Subcharts use the parent chart's selected values file
+- **Alias Resolution**: Always check `Chart.yaml` dependencies for aliases
+- **Cache Strategy**: Subchart caches keyed by `{subchartRoot}:{parentOverrideFile}`
+- **Status Bar Display**: Shows `📦 subchartName > 📄 fileName` when in subchart
+
+**Value Position Resolution (`findSubchartValuePositionInChain`)**:
+Priority order for go-to-definition:
+1. Parent override file (under `subchartKey.path`)
+2. Parent default `values.yaml` (under `subchartKey.path`)
+3. Subchart's own `values.yaml` (under `path`)
+
+**Limitations**:
+- Only expanded directories supported, not `.tgz` archives
+- Nested subcharts (subcharts within subcharts) not supported
+- Parent context is not recursive to avoid infinite loops
+
 ## PR Guidelines
 
 1. Run `npm run lint` before committing

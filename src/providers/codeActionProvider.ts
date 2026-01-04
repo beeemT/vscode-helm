@@ -58,15 +58,25 @@ export class HelmCodeActionProvider implements vscode.CodeActionProvider {
    * Create a code action to add a missing value to values.yaml
    */
   private createAddValueAction(unsetRef: UnsetValueReference): vscode.CodeAction | undefined {
+    // For subcharts, the value path needs to be prefixed with the subchart key
+    // since the value is created in the parent's values.yaml
+    let displayPath = unsetRef.reference.path;
+    let actualPath = unsetRef.reference.path;
+
+    if (unsetRef.subchartKey) {
+      actualPath = `${unsetRef.subchartKey}.${unsetRef.reference.path}`;
+      displayPath = actualPath;
+    }
+
     const action = new vscode.CodeAction(
-      `Add '.Values.${unsetRef.reference.path}' to values.yaml`,
+      `Add '.Values.${displayPath}' to values.yaml`,
       vscode.CodeActionKind.QuickFix
     );
 
     action.command = {
       command: 'helmValues.createMissingValue',
       title: 'Add missing value to values.yaml',
-      arguments: [unsetRef.valuesYamlPath, unsetRef.reference.path],
+      arguments: [unsetRef.valuesYamlPath, actualPath],
     };
 
     action.isPreferred = true;

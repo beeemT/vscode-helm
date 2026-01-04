@@ -98,15 +98,42 @@ export class StatusBarProvider {
     }
 
     this.currentChartContext = chartContext;
-    const selectedFile = this.getSelectedFile(chartContext.chartRoot);
 
-    if (selectedFile) {
-      const fileName = path.basename(selectedFile);
-      this.statusBarItem.text = `$(file-code) ${fileName}`;
+    // For subcharts, get the selected file from the parent chart
+    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
+      ? chartContext.parentChart.chartRoot
+      : chartContext.chartRoot;
+    const selectedFile = this.getSelectedFile(effectiveChartRoot);
+
+    // Build status bar text with subchart indicator
+    let statusText: string;
+    let tooltipText: string;
+
+    if (chartContext.isSubchart && chartContext.parentChart) {
+      const parentName = path.basename(chartContext.parentChart.chartRoot);
+      const subchartName = chartContext.subchartName || path.basename(chartContext.chartRoot);
+
+      if (selectedFile) {
+        const fileName = path.basename(selectedFile);
+        statusText = `$(package) ${subchartName} > $(file-code) ${fileName}`;
+        tooltipText = `Parent: ${parentName}\nSubchart: ${subchartName}\nValues: ${fileName}\n\nClick to select values override file`;
+      } else {
+        statusText = `$(package) ${subchartName} > $(file-code) None`;
+        tooltipText = `Parent: ${parentName}\nSubchart: ${subchartName}\nValues: None (using defaults)\n\nClick to select values override file`;
+      }
     } else {
-      this.statusBarItem.text = '$(file-code) None';
+      if (selectedFile) {
+        const fileName = path.basename(selectedFile);
+        statusText = `$(file-code) ${fileName}`;
+        tooltipText = `Values: ${fileName}\n\nClick to select values override file`;
+      } else {
+        statusText = '$(file-code) None';
+        tooltipText = 'Values: None (using defaults)\n\nClick to select values override file';
+      }
     }
 
+    this.statusBarItem.text = statusText;
+    this.statusBarItem.tooltip = tooltipText;
     this.statusBarItem.show();
   }
 
@@ -133,27 +160,38 @@ export class StatusBarProvider {
       this.currentChartContext = chartContext;
     }
 
+    // For subcharts, use the parent chart's values files
+    const effectiveChartContext = chartContext.isSubchart && chartContext.parentChart
+      ? chartContext.parentChart
+      : chartContext;
+
     const helmService = HelmChartService.getInstance();
-    const valuesFiles = await helmService.findValuesFiles(chartContext.chartRoot);
+    const valuesFiles = await helmService.findValuesFiles(effectiveChartContext.chartRoot);
 
     if (valuesFiles.length === 0) {
-      vscode.window.showInformationMessage('No values override files found in chart');
+      const contextLabel = chartContext.isSubchart ? 'parent chart' : 'chart';
+      vscode.window.showInformationMessage(`No values override files found in ${contextLabel}`);
       return;
     }
 
     // Build QuickPick items
     const items: vscode.QuickPickItem[] = [];
 
+    // Add description for subcharts
+    const subchartNote = chartContext.isSubchart
+      ? ` (from parent ${path.basename(effectiveChartContext.chartRoot)})`
+      : '';
+
     // Add "None" option
     items.push({
       label: '$(x) None',
-      description: 'Use only default values.yaml',
+      description: `Use only default values.yaml${subchartNote}`,
       detail: undefined,
     });
 
     // Add values files
     for (const file of valuesFiles) {
-      const relativePath = path.relative(chartContext.chartRoot, file);
+      const relativePath = path.relative(effectiveChartContext.chartRoot, file);
       items.push({
         label: `$(file) ${path.basename(file)}`,
         description: relativePath !== path.basename(file) ? relativePath : undefined,
@@ -162,14 +200,19 @@ export class StatusBarProvider {
     }
 
     // Show QuickPick
+    const pickerTitle = chartContext.isSubchart
+      ? `Select values override file (for subchart ${chartContext.subchartName})`
+      : 'Select values override file';
+
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select values override file',
+      placeHolder: pickerTitle,
       matchOnDescription: true,
     });
 
     if (selected) {
       const selectedFile = selected.label.startsWith('$(x)') ? '' : selected.detail || '';
-      await this.setSelectedFile(chartContext.chartRoot, selectedFile);
+      // Always set on the effective (parent for subcharts) chart root
+      await this.setSelectedFile(effectiveChartContext.chartRoot, selectedFile);
     }
   }
 

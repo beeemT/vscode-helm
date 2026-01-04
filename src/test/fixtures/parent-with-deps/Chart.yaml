@@ -1,0 +1,13 @@
+apiVersion: v2
+name: parent-chart
+description: A parent chart with subchart dependencies
+version: 1.0.0
+appVersion: "1.0"
+
+dependencies:
+  - name: mysql
+    version: "1.0.0"
+    alias: database
+    condition: database.enabled
+  - name: redis
+    version: "1.0.0"

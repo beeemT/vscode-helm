@@ -32,6 +32,8 @@ export class FileWatcher {
   public initialize(context: vscode.ExtensionContext): void {
     // Watch for changes to values files in the workspace
     this.setupValuesFileWatcher(context);
+    // Watch for changes in charts/ subdirectories (subcharts)
+    this.setupSubchartWatcher(context);
   }
 
   /**
@@ -69,6 +71,69 @@ export class FileWatcher {
 
       this.watchers.push(watcher);
       context.subscriptions.push(watcher);
+    }
+  }
+
+  /**
+   * Set up watcher for subchart files (charts/ directory)
+   */
+  private setupSubchartWatcher(context: vscode.ExtensionContext): void {
+    // Watch for changes in charts/*/values.yaml and charts/*/Chart.yaml
+    const subchartPatterns = [
+      '**/charts/*/values.yaml',
+      '**/charts/*/values.yml',
+      '**/charts/*/Chart.yaml',
+    ];
+
+    for (const pattern of subchartPatterns) {
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+      watcher.onDidChange(async (uri) => {
+        await this.handleSubchartFileChange(uri);
+      });
+
+      watcher.onDidCreate(async (uri) => {
+        await this.handleSubchartFileChange(uri);
+      });
+
+      watcher.onDidDelete(async (uri) => {
+        await this.handleSubchartFileChange(uri);
+      });
+
+      this.watchers.push(watcher);
+      context.subscriptions.push(watcher);
+    }
+  }
+
+  /**
+   * Handle subchart file changes (values.yaml or Chart.yaml in charts/ directory)
+   */
+  private async handleSubchartFileChange(uri: vscode.Uri): Promise<void> {
+    // Find the parent chart root (two levels up from charts/subchart/)
+    const subchartRoot = path.dirname(uri.fsPath);
+    const chartsDir = path.dirname(subchartRoot);
+
+    if (path.basename(chartsDir) !== 'charts') {
+      return;
+    }
+
+    const parentChartRoot = path.dirname(chartsDir);
+    const parentChartYaml = path.join(parentChartRoot, 'Chart.yaml');
+
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(parentChartYaml));
+
+      // Invalidate the parent chart's cache (which affects subchart value resolution)
+      const valuesCache = ValuesCache.getInstance();
+      valuesCache.invalidateCache(parentChartRoot);
+
+      // Also invalidate the subchart's own cache if it has one
+      valuesCache.invalidateCache(subchartRoot);
+
+      // Notify callbacks
+      this.notifyValuesChanged(parentChartRoot);
+    } catch {
+      // Parent Chart.yaml not found, not a valid parent chart
     }
   }
 

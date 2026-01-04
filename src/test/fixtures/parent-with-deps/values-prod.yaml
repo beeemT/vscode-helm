@@ -1,0 +1,14 @@
+# Production override values
+replicaCount: 3
+
+database:
+  auth:
+    rootPassword: "prod-secret"
+  primary:
+    resources:
+      limits:
+        memory: 1Gi
+
+redis:
+  auth:
+    password: "prod-redis-secret"

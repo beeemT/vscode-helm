@@ -268,8 +268,8 @@ suite('HelmDecorationHoverProvider', () => {
       'Should indicate source is values-prod.yaml'
     );
     assert.ok(
-      content.value.includes('(override)'),
-      'Should indicate it is an override file'
+      content.value.includes('sample-chart'),
+      'Should indicate which chart the file belongs to'
     );
 
     // Clean up: reset to no override

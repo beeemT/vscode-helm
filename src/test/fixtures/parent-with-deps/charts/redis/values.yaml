@@ -1,0 +1,13 @@
+# Redis subchart default values
+enabled: false
+
+auth:
+  password: "default-redis-password"
+
+replica:
+  replicaCount: 1
+
+master:
+  resources:
+    limits:
+      memory: 128Mi
