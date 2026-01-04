@@ -149,9 +149,21 @@ export class ValuesDecorationProvider {
     const statusBarProvider = StatusBarProvider.getInstance();
     const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
 
-    // Get merged values
+    // Get merged values for .Values references
     const valuesCache = ValuesCache.getInstance();
     const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+
+    // Get Chart metadata for .Chart references
+    const chartMetadata = await helmService.getChartMetadata(chartContext.chartRoot);
+
+    // Get Release info for .Release references
+    const releaseInfo = helmService.getReleaseInfo(chartContext.chartRoot);
+
+    // Get Capabilities for .Capabilities references
+    const capabilities = helmService.getCapabilities();
+
+    // Get Template info for .Template references
+    const templateInfo = helmService.getTemplateInfo(editor.document.uri.fsPath, chartContext.chartRoot);
 
     // Parse template references
     const text = editor.document.getText();
@@ -172,15 +184,44 @@ export class ValuesDecorationProvider {
     const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
 
     for (const ref of references) {
-      const resolvedValue = valuesCache.resolveValuePath(values, ref.path);
-
       // Create position at the end of the template expression for the decoration
       const endPosition = editor.document.positionAt(ref.endOffset);
       const startPosition = editor.document.positionAt(ref.startOffset);
       const range = new vscode.Range(endPosition, endPosition);
       const fullRange = new vscode.Range(startPosition, endPosition);
 
-      if (resolvedValue === undefined && ref.defaultValue === undefined) {
+      // Resolve value based on object type
+      let resolvedValue: unknown;
+      let sourceObject: Record<string, unknown> | undefined;
+
+      switch (ref.objectType) {
+        case 'Values':
+          resolvedValue = valuesCache.resolveValuePath(values, ref.path);
+          break;
+        case 'Chart':
+          sourceObject = chartMetadata as Record<string, unknown> | undefined;
+          resolvedValue = sourceObject ? valuesCache.resolveValuePath(sourceObject, ref.path) : undefined;
+          break;
+        case 'Release':
+          sourceObject = releaseInfo as unknown as Record<string, unknown>;
+          resolvedValue = valuesCache.resolveValuePath(sourceObject, ref.path);
+          break;
+        case 'Capabilities':
+          sourceObject = capabilities as Record<string, unknown>;
+          resolvedValue = valuesCache.resolveValuePath(sourceObject, ref.path);
+          break;
+        case 'Template':
+          sourceObject = templateInfo as Record<string, unknown>;
+          resolvedValue = valuesCache.resolveValuePath(sourceObject, ref.path);
+          break;
+        case 'Files':
+          // .Files is complex and depends on runtime, show a placeholder
+          resolvedValue = '<file-content>';
+          break;
+      }
+
+      // Only show unset warnings for .Values references (other objects have known values)
+      if (ref.objectType === 'Values' && resolvedValue === undefined && ref.defaultValue === undefined) {
         // Value is unset - show warning decoration
         unsetDecorations.push({
           range,

@@ -38,6 +38,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Register hover provider for decoration tooltips
   // Responds to positions at the end of template expressions (where decorations appear)
+  // Pattern **/templates/** covers all files including .tpl
   const hoverProvider = HelmDecorationHoverProvider.getInstance();
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(
@@ -52,6 +53,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Register definition provider for Cmd/Ctrl+Click go-to-definition
   // Register for both 'yaml' and 'helm' languages
+  // Pattern **/templates/** covers all files including .tpl
   const definitionProvider = HelmDefinitionProvider.getInstance();
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(
@@ -87,6 +89,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // Register code action provider for quick fixes on unset values
+  // Pattern **/templates/** covers all files including .tpl
   const codeActionProvider = HelmCodeActionProvider.getInstance();
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(

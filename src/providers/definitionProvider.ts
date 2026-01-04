@@ -5,8 +5,9 @@ import { ValuesCache } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
 
 /**
- * Provider for go-to-definition functionality on .Values references.
+ * Provider for go-to-definition functionality on Helm object references.
  * Enables Cmd/Ctrl+Click on .Values.xxx to jump to the value definition.
+ * Also supports .Chart references to jump to Chart.yaml.
  */
 export class HelmDefinitionProvider implements vscode.DefinitionProvider {
   private static instance: HelmDefinitionProvider;
@@ -37,7 +38,7 @@ export class HelmDefinitionProvider implements vscode.DefinitionProvider {
       return undefined;
     }
 
-    // Find if the cursor is within a .Values reference
+    // Find if the cursor is within a Helm object reference
     const text = document.getText();
     const templateParser = TemplateParser.getInstance();
     const references = templateParser.parseTemplateReferences(text);
@@ -54,25 +55,40 @@ export class HelmDefinitionProvider implements vscode.DefinitionProvider {
       return undefined;
     }
 
-    // Get the selected values file
-    const statusBarProvider = StatusBarProvider.getInstance();
-    const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
+    // Handle based on object type
+    switch (reference.objectType) {
+      case 'Values': {
+        // Get the selected values file
+        const statusBarProvider = StatusBarProvider.getInstance();
+        const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
 
-    // Find the position of the value definition
-    const valuesCache = ValuesCache.getInstance();
-    const valuePosition = await valuesCache.findValuePositionInChain(
-      chartContext.chartRoot,
-      selectedFile,
-      reference.path
-    );
+        // Find the position of the value definition
+        const valuesCache = ValuesCache.getInstance();
+        const valuePosition = await valuesCache.findValuePositionInChain(
+          chartContext.chartRoot,
+          selectedFile,
+          reference.path
+        );
 
-    if (!valuePosition) {
-      return undefined;
+        if (!valuePosition) {
+          return undefined;
+        }
+
+        const targetUri = vscode.Uri.file(valuePosition.filePath);
+        const targetPosition = new vscode.Position(valuePosition.line, valuePosition.character);
+        return new vscode.Location(targetUri, targetPosition);
+      }
+
+      case 'Chart': {
+        // Navigate to Chart.yaml
+        const targetUri = vscode.Uri.file(chartContext.chartYamlPath);
+        // TODO: Could find the specific line for the path (e.g., name, version)
+        return new vscode.Location(targetUri, new vscode.Position(0, 0));
+      }
+
+      // Other object types don't have file-based definitions
+      default:
+        return undefined;
     }
-
-    const targetUri = vscode.Uri.file(valuePosition.filePath);
-    const targetPosition = new vscode.Position(valuePosition.line, valuePosition.character);
-
-    return new vscode.Location(targetUri, targetPosition);
   }
 }

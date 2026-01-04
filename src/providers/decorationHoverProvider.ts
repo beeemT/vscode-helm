@@ -1,13 +1,13 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { HelmChartService } from '../services/helmChartService';
-import { TemplateParser } from '../services/templateParser';
-import { ValuesCache, ValueSource } from '../services/valuesCache';
+import { TemplateParser, TemplateReference } from '../services/templateParser';
+import { ValuesCache } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
 
 /**
- * Provider for hover information at the end of .Values template expressions.
- * Shows resolved value and provides a link to go to definition.
+ * Provider for hover information at the end of Helm object references.
+ * Shows resolved value and provides a link to go to definition (for .Values).
  * Only responds to the exact end position of template expressions (where decorations appear).
  */
 export class HelmDecorationHoverProvider implements vscode.HoverProvider {
@@ -39,7 +39,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       return undefined;
     }
 
-    // Find if the cursor is at the end of a .Values reference (where decoration appears)
+    // Find if the cursor is at the end of a Helm object reference (where decoration appears)
     const text = document.getText();
     const templateParser = TemplateParser.getInstance();
     const references = templateParser.parseTemplateReferences(text);
@@ -59,21 +59,66 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       return undefined;
     }
 
-    // Get the selected values file
+    // Get the selected values file (for .Values)
     const statusBarProvider = StatusBarProvider.getInstance();
     const selectedFile = statusBarProvider?.getSelectedFile(chartContext.chartRoot) || '';
-
-    // Get merged values and resolve the value
-    const valuesCache = ValuesCache.getInstance();
-    const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
-    const resolvedValue = valuesCache.resolveValuePath(values, reference.path);
 
     // Get max length from config
     const config = vscode.workspace.getConfiguration('helmValues');
     const maxLength = config.get<number>('inlayHintMaxLength', 50);
 
-    // Check if the value is unset (not in values.yaml or override file, and no default)
-    const isUnset = resolvedValue === undefined && reference.defaultValue === undefined;
+    const valuesCache = ValuesCache.getInstance();
+
+    // Resolve value based on object type
+    let resolvedValue: unknown;
+    let sourceDescription: string;
+
+    switch (reference.objectType) {
+      case 'Values': {
+        const values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
+        resolvedValue = valuesCache.resolveValuePath(values, reference.path);
+        sourceDescription = await this.getValuesSourceDescription(
+          chartContext.chartRoot,
+          selectedFile,
+          reference,
+          valuesCache,
+          helmService
+        );
+        break;
+      }
+      case 'Chart': {
+        const chartMetadata = await helmService.getChartMetadata(chartContext.chartRoot);
+        resolvedValue = chartMetadata ? valuesCache.resolveValuePath(chartMetadata as Record<string, unknown>, reference.path) : undefined;
+        sourceDescription = '`Chart.yaml`';
+        break;
+      }
+      case 'Release': {
+        const releaseInfo = helmService.getReleaseInfo(chartContext.chartRoot);
+        resolvedValue = valuesCache.resolveValuePath(releaseInfo as unknown as Record<string, unknown>, reference.path);
+        sourceDescription = 'Release context (runtime)';
+        break;
+      }
+      case 'Capabilities': {
+        const capabilities = helmService.getCapabilities();
+        resolvedValue = valuesCache.resolveValuePath(capabilities as Record<string, unknown>, reference.path);
+        sourceDescription = 'Kubernetes capabilities (runtime)';
+        break;
+      }
+      case 'Template': {
+        const templateInfo = helmService.getTemplateInfo(document.uri.fsPath, chartContext.chartRoot);
+        resolvedValue = valuesCache.resolveValuePath(templateInfo as Record<string, unknown>, reference.path);
+        sourceDescription = 'Template context';
+        break;
+      }
+      case 'Files': {
+        resolvedValue = '<file-content>';
+        sourceDescription = 'File access (runtime)';
+        break;
+      }
+    }
+
+    // Check if the value is unset (only applies to .Values)
+    const isUnset = reference.objectType === 'Values' && resolvedValue === undefined && reference.defaultValue === undefined;
 
     // Format the display value
     const displayValue =
@@ -83,48 +128,128 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
           ? `"${reference.defaultValue}"`
           : '⚠ unset';
 
-    // Find the position of the value definition (only if value exists)
-    const valuePosition = isUnset
-      ? undefined
-      : await valuesCache.findValuePositionInChain(
-          chartContext.chartRoot,
-          selectedFile,
-          reference.path
-        );
+    // Build hover content based on object type
+    const hoverContent = await this.buildHoverContent(
+      reference,
+      displayValue,
+      sourceDescription,
+      isUnset,
+      chartContext.chartRoot,
+      selectedFile,
+      helmService,
+      valuesCache
+    );
 
-    // Get default values path for creating missing values
-    const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
+    // Create range for the hover - just the end of the expression
+    const endPosition = document.positionAt(reference.endOffset);
+    const range = new vscode.Range(endPosition, endPosition);
 
-    // Helper to format source label
-    const formatSourceLabel = (source: ValueSource, filePath: string): string => {
-      const fileName = path.basename(filePath);
-      switch (source) {
-        case 'override':
-          return `\`${fileName}\` (override)`;
-        case 'default':
-          return `\`values.yaml\``;
-        case 'inline-default':
-          return 'inline default';
-      }
-    };
+    return new vscode.Hover(hoverContent, range);
+  }
 
-    // Build hover content
-    let hoverContent: vscode.MarkdownString;
+  private async getValuesSourceDescription(
+    chartRoot: string,
+    selectedFile: string,
+    reference: TemplateReference,
+    valuesCache: ValuesCache,
+    helmService: HelmChartService
+  ): Promise<string> {
+    const valuePosition = await valuesCache.findValuePositionInChain(
+      chartRoot,
+      selectedFile,
+      reference.path
+    );
+
+    if (!valuePosition) {
+      return '';
+    }
+
+    const fileName = path.basename(valuePosition.filePath);
+    switch (valuePosition.source) {
+      case 'override':
+        return `\`${fileName}\` (override)`;
+      case 'default':
+        return '`values.yaml`';
+      case 'inline-default':
+        return 'inline default';
+    }
+  }
+
+  private async buildHoverContent(
+    reference: TemplateReference,
+    displayValue: string,
+    sourceDescription: string,
+    isUnset: boolean,
+    chartRoot: string,
+    selectedFile: string,
+    helmService: HelmChartService,
+    valuesCache: ValuesCache
+  ): Promise<vscode.MarkdownString> {
+    const pathDisplay = `.${reference.objectType}.${reference.path}`;
+
+    if (reference.objectType === 'Values') {
+      return this.buildValuesHoverContent(
+        reference,
+        displayValue,
+        isUnset,
+        chartRoot,
+        selectedFile,
+        helmService,
+        valuesCache
+      );
+    }
+
+    // For non-.Values objects, show simple info
+    let content = `**Value:** \`${displayValue}\`\n\n` +
+      `**Path:** \`${pathDisplay}\``;
+
+    if (sourceDescription) {
+      content += `\n\n**Source:** ${sourceDescription}`;
+    }
+
+    // Add description for runtime values
+    if (reference.objectType === 'Release') {
+      content += '\n\n*Note: Release values are determined at deployment time.*';
+    } else if (reference.objectType === 'Capabilities') {
+      content += '\n\n*Note: Capabilities depend on the target Kubernetes cluster.*';
+    }
+
+    return new vscode.MarkdownString(content);
+  }
+
+  private async buildValuesHoverContent(
+    reference: TemplateReference,
+    displayValue: string,
+    isUnset: boolean,
+    chartRoot: string,
+    selectedFile: string,
+    helmService: HelmChartService,
+    valuesCache: ValuesCache
+  ): Promise<vscode.MarkdownString> {
+    const defaultValuesPath = await helmService.getDefaultValuesPath(chartRoot);
 
     if (isUnset && defaultValuesPath) {
       // Unset value - show "Create value" link
       const createArgs = encodeURIComponent(
         JSON.stringify([defaultValuesPath, reference.path])
       );
-      hoverContent = new vscode.MarkdownString(
+      const hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
           `[➕ Create value in values.yaml](command:helmValues.createMissingValue?${createArgs})`
       );
       hoverContent.isTrusted = true;
-    } else if (valuePosition) {
+      return hoverContent;
+    }
+
+    const valuePosition = await valuesCache.findValuePositionInChain(
+      chartRoot,
+      selectedFile,
+      reference.path
+    );
+
+    if (valuePosition) {
       const fileUri = vscode.Uri.file(valuePosition.filePath);
-      // Use plain object for selection - vscode.Range doesn't serialize properly
       const args = encodeURIComponent(
         JSON.stringify([
           fileUri.toString(),
@@ -136,31 +261,33 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
           },
         ])
       );
-      const sourceLabel = formatSourceLabel(valuePosition.source, valuePosition.filePath);
-      hoverContent = new vscode.MarkdownString(
+      const fileName = path.basename(valuePosition.filePath);
+      const sourceLabel = valuePosition.source === 'override'
+        ? `\`${fileName}\` (override)`
+        : valuePosition.source === 'default'
+          ? '`values.yaml`'
+          : 'inline default';
+
+      const hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
           `**Source:** ${sourceLabel}\n\n` +
           `[Go to definition](command:vscode.open?${args}) (or Cmd/Ctrl+Click on .Values reference)`
       );
       hoverContent.isTrusted = true;
-    } else if (reference.defaultValue !== undefined) {
-      // Value comes from inline default
-      hoverContent = new vscode.MarkdownString(
+      return hoverContent;
+    }
+
+    if (reference.defaultValue !== undefined) {
+      return new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
           `**Source:** inline default`
       );
-    } else {
-      hoverContent = new vscode.MarkdownString(
-        `**Value:** \`${displayValue}\`\n\n` + `**Path:** \`.Values.${reference.path}\``
-      );
     }
 
-    // Create range for the hover - just the end of the expression
-    const endPosition = document.positionAt(reference.endOffset);
-    const range = new vscode.Range(endPosition, endPosition);
-
-    return new vscode.Hover(hoverContent, range);
+    return new vscode.MarkdownString(
+      `**Value:** \`${displayValue}\`\n\n` + `**Path:** \`.Values.${reference.path}\``
+    );
   }
 }

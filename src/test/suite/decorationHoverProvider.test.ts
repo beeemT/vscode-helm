@@ -317,3 +317,117 @@ suite('HelmDecorationHoverProvider', () => {
     ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
   });
 });
+
+suite('HelmDecorationHoverProvider - Helm Objects', () => {
+  const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+  const sampleChartPath = path.join(fixturesPath, 'sample-chart');
+  const helpersTplPath = path.join(sampleChartPath, 'templates', '_helpers.tpl');
+
+  let document: vscode.TextDocument;
+  let provider: HelmDecorationHoverProvider;
+
+  suiteSetup(async () => {
+    HelmChartService.getInstance();
+    provider = HelmDecorationHoverProvider.getInstance();
+    document = await vscode.workspace.openTextDocument(helpersTplPath);
+  });
+
+  test('hover for .Chart.Name shows Chart.yaml value', async () => {
+    // Find .Chart.Name in the template
+    const text = document.getText();
+    const match = text.match(/\.Chart\.Name/);
+    assert.ok(match, 'Should find .Chart.Name in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover for .Chart.Name');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show the chart name from Chart.yaml
+    assert.ok(content.value.includes('Value:'), 'Should show Value label');
+    assert.ok(content.value.includes('sample-chart'), 'Should show the chart name');
+    assert.ok(content.value.includes('.Chart.Name'), 'Should show the path');
+    assert.ok(content.value.includes('Chart.yaml'), 'Should indicate source is Chart.yaml');
+  });
+
+  test('hover for .Release.Name shows runtime placeholder', async () => {
+    // Find .Release.Name in the template
+    const text = document.getText();
+    const match = text.match(/\.Release\.Name/);
+    assert.ok(match, 'Should find .Release.Name in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover for .Release.Name');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show Release context info
+    assert.ok(content.value.includes('Value:'), 'Should show Value label');
+    assert.ok(content.value.includes('.Release.Name'), 'Should show the path');
+    assert.ok(
+      content.value.includes('Release') || content.value.includes('runtime'),
+      'Should indicate this is release/runtime context'
+    );
+  });
+
+  test('hover for .Chart reference does not show unset warning', async () => {
+    // Find .Chart.Name in the template
+    const text = document.getText();
+    const match = text.match(/\.Chart\.Name/);
+    assert.ok(match, 'Should find .Chart.Name in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should NOT show unset warning for .Chart references
+    assert.ok(!content.value.includes('⚠ unset'), 'Should not show unset warning for .Chart');
+    assert.ok(
+      !content.value.includes('Create value'),
+      'Should not show Create value link for .Chart'
+    );
+  });
+
+  test('hover for .Release reference does not show Go to definition', async () => {
+    // Find .Release.Name in the template
+    const text = document.getText();
+    const match = text.match(/\.Release\.Name/);
+    assert.ok(match, 'Should find .Release.Name in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should NOT show Go to definition for .Release references
+    assert.ok(
+      !content.value.includes('Go to definition'),
+      'Should not show Go to definition for .Release'
+    );
+  });
+});

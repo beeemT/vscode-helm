@@ -87,6 +87,11 @@ suite('HelmChartService', () => {
       assert.strictEqual(service.isHelmTemplateFile(uri), true);
     });
 
+    test('returns true for .tpl files in templates directory', () => {
+      const uri = vscode.Uri.file('/some/chart/templates/_helpers.tpl');
+      assert.strictEqual(service.isHelmTemplateFile(uri), true);
+    });
+
     test('returns false for values file', () => {
       const uri = vscode.Uri.file('/some/chart/values.yaml');
       assert.strictEqual(service.isHelmTemplateFile(uri), false);
@@ -95,6 +100,90 @@ suite('HelmChartService', () => {
     test('returns false for Chart.yaml', () => {
       const uri = vscode.Uri.file('/some/chart/Chart.yaml');
       assert.strictEqual(service.isHelmTemplateFile(uri), false);
+    });
+  });
+
+  suite('getChartMetadata', () => {
+    test('returns Chart.yaml contents with PascalCase keys', async () => {
+      const metadata = await service.getChartMetadata(sampleChartPath);
+
+      assert.ok(metadata, 'Should return chart metadata');
+      // Helm uses PascalCase for .Chart fields (e.g., .Chart.Name, .Chart.Version)
+      assert.strictEqual(metadata!.Name, 'sample-chart', 'Should have correct Name');
+      assert.strictEqual(metadata!.Version, '0.1.0', 'Should have correct Version');
+      assert.strictEqual(metadata!.AppVersion, '1.0.0', 'Should have correct AppVersion');
+      assert.strictEqual(metadata!.ApiVersion, 'v2', 'Should have correct ApiVersion');
+    });
+
+    test('returns undefined for non-existent chart', async () => {
+      const metadata = await service.getChartMetadata('/non/existent/path');
+
+      assert.strictEqual(metadata, undefined);
+    });
+
+    test('caches chart metadata', async () => {
+      // Get metadata twice
+      const metadata1 = await service.getChartMetadata(sampleChartPath);
+      const metadata2 = await service.getChartMetadata(sampleChartPath);
+
+      // Both should return the same data
+      assert.deepStrictEqual(metadata1, metadata2);
+    });
+
+    test('clearChartMetadataCache clears the cache', async () => {
+      // Get metadata to populate cache
+      await service.getChartMetadata(sampleChartPath);
+
+      // Clear cache
+      service.clearChartMetadataCache(sampleChartPath);
+
+      // Should still work after clearing
+      const metadata = await service.getChartMetadata(sampleChartPath);
+      assert.ok(metadata, 'Should return metadata after cache clear');
+    });
+  });
+
+  suite('getReleaseInfo', () => {
+    test('returns release info placeholder', () => {
+      const releaseInfo = service.getReleaseInfo(sampleChartPath);
+
+      assert.ok(releaseInfo, 'Should return release info');
+      assert.ok(releaseInfo.Name, 'Should have Name');
+      assert.ok(releaseInfo.Namespace, 'Should have Namespace');
+      assert.strictEqual(typeof releaseInfo.IsInstall, 'boolean', 'IsInstall should be boolean');
+      assert.strictEqual(typeof releaseInfo.IsUpgrade, 'boolean', 'IsUpgrade should be boolean');
+      assert.strictEqual(typeof releaseInfo.Revision, 'number', 'Revision should be number');
+      assert.ok(releaseInfo.Service, 'Should have Service');
+    });
+  });
+
+  suite('getCapabilities', () => {
+    test('returns capabilities info', () => {
+      const capabilities = service.getCapabilities();
+
+      assert.ok(capabilities, 'Should return capabilities');
+      assert.ok(capabilities.APIVersions, 'Should have APIVersions');
+      assert.ok(capabilities.KubeVersion, 'Should have KubeVersion');
+      assert.ok(capabilities.HelmVersion, 'Should have HelmVersion');
+    });
+  });
+
+  suite('getTemplateInfo', () => {
+    test('returns template info for file', () => {
+      const templatePath = path.join(sampleChartPath, 'templates', 'deployment.yaml');
+      const templateInfo = service.getTemplateInfo(templatePath, sampleChartPath);
+
+      assert.ok(templateInfo, 'Should return template info');
+      assert.strictEqual(templateInfo.Name, 'templates/deployment.yaml', 'Should have correct Name');
+      assert.strictEqual(templateInfo.BasePath, 'templates', 'Should have correct BasePath');
+    });
+
+    test('returns template info for nested file', () => {
+      const templatePath = path.join(sampleChartPath, 'templates', 'nested', 'service.yaml');
+      const templateInfo = service.getTemplateInfo(templatePath, sampleChartPath);
+
+      assert.ok(templateInfo, 'Should return template info');
+      assert.ok(templateInfo.Name.includes('nested'), 'Name should include nested path');
     });
   });
 });

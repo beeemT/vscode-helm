@@ -14,8 +14,9 @@ suite('TemplateParser', () => {
       const refs = parser.parseTemplateReferences(text);
 
       assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Values');
       assert.strictEqual(refs[0].path, 'replicaCount');
-      assert.strictEqual(refs[0].fullMatch, '{{ .Values.replicaCount }}');
+      assert.strictEqual(refs[0].fullMatch, '.Values.replicaCount');
     });
 
     test('extracts nested .Values reference', () => {
@@ -94,8 +95,11 @@ suite('TemplateParser', () => {
       const refs = parser.parseTemplateReferences(text);
 
       assert.strictEqual(refs.length, 1);
-      assert.strictEqual(refs[0].startOffset, 7);
-      assert.strictEqual(refs[0].endOffset, 24);
+      // Offset points to .Values.foo, not the entire {{ }} block
+      // 'prefix {{ ' = 10 chars, so .Values.foo starts at index 10
+      assert.strictEqual(refs[0].startOffset, 10);
+      // .Values.foo is 11 chars, so end is at 21
+      assert.strictEqual(refs[0].endOffset, 21);
     });
 
     test('returns empty array for no references', () => {
@@ -105,18 +109,22 @@ suite('TemplateParser', () => {
       assert.strictEqual(refs.length, 0);
     });
 
-    test('ignores .Release references', () => {
+    test('extracts .Release references', () => {
       const text = '{{ .Release.Name }}';
       const refs = parser.parseTemplateReferences(text);
 
-      assert.strictEqual(refs.length, 0);
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Release');
+      assert.strictEqual(refs[0].path, 'Name');
     });
 
-    test('ignores .Chart references', () => {
+    test('extracts .Chart references', () => {
       const text = '{{ .Chart.Name }}';
       const refs = parser.parseTemplateReferences(text);
 
-      assert.strictEqual(refs.length, 0);
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Chart');
+      assert.strictEqual(refs[0].path, 'Name');
     });
 
     test('extracts .Values in if statement', () => {
@@ -173,6 +181,125 @@ suite('TemplateParser', () => {
 
       assert.strictEqual(refs.length, 1);
       assert.strictEqual(refs[0].path, 'global.debug');
+    });
+
+    test('extracts .Values with pipe functions (trunc, trimSuffix)', () => {
+      const text = '{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'fullnameOverride');
+    });
+
+    test('extracts .Values in default function call', () => {
+      const text = '{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      // Now extracts both .Chart.Name and .Values.nameOverride
+      assert.strictEqual(refs.length, 2);
+      const valuesRef = refs.find(r => r.objectType === 'Values');
+      assert.ok(valuesRef);
+      assert.strictEqual(valuesRef!.path, 'nameOverride');
+      const chartRef = refs.find(r => r.objectType === 'Chart');
+      assert.ok(chartRef);
+      assert.strictEqual(chartRef!.path, 'Name');
+    });
+
+    test('extracts .Values in variable assignment', () => {
+      const text = '{{- $name := default .Chart.Name .Values.nameOverride }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      // Now extracts both .Chart.Name and .Values.nameOverride
+      assert.strictEqual(refs.length, 2);
+      const valuesRef = refs.find(r => r.objectType === 'Values');
+      assert.ok(valuesRef);
+      assert.strictEqual(valuesRef!.path, 'nameOverride');
+    });
+
+    test('extracts .Values from _helpers.tpl patterns', () => {
+      const text = `{{/*
+Expand the name of the chart.
+*/}}
+{{- define "sample-chart.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "sample-chart.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}`;
+      const refs = parser.parseTemplateReferences(text);
+
+      // Now extracts: .Chart.Name (x2), .Values.nameOverride (x2),
+      // .Values.fullnameOverride (x2), .Release.Name (x1) = 7 total
+      assert.strictEqual(refs.length, 7);
+
+      // Filter by type
+      const valuesRefs = refs.filter(r => r.objectType === 'Values');
+      const chartRefs = refs.filter(r => r.objectType === 'Chart');
+      const releaseRefs = refs.filter(r => r.objectType === 'Release');
+
+      assert.strictEqual(valuesRefs.length, 4);
+      assert.strictEqual(chartRefs.length, 2);
+      assert.strictEqual(releaseRefs.length, 1);
+
+      const valuesPaths = valuesRefs.map(r => r.path);
+      assert.ok(valuesPaths.includes('nameOverride'));
+      assert.ok(valuesPaths.includes('fullnameOverride'));
+    });
+
+    test('extracts .Values with default string value', () => {
+      const text = '{{- default "myapp" .Values.nameOverride }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'nameOverride');
+    });
+
+    test('extracts .Capabilities references', () => {
+      const text = '{{ .Capabilities.KubeVersion.Major }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Capabilities');
+      assert.strictEqual(refs[0].path, 'KubeVersion.Major');
+    });
+
+    test('extracts .Template references', () => {
+      const text = '{{ .Template.Name }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Template');
+      assert.strictEqual(refs[0].path, 'Name');
+    });
+
+    test('extracts .Files references', () => {
+      const text = '{{ .Files.Get "config.ini" }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].objectType, 'Files');
+      assert.strictEqual(refs[0].path, 'Get');
+    });
+
+    test('extracts mixed object types in same template', () => {
+      const text = `name: {{ .Chart.Name }}
+namespace: {{ .Release.Namespace }}
+replicas: {{ .Values.replicaCount }}`;
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 3);
+      assert.ok(refs.some(r => r.objectType === 'Chart' && r.path === 'Name'));
+      assert.ok(refs.some(r => r.objectType === 'Release' && r.path === 'Namespace'));
+      assert.ok(refs.some(r => r.objectType === 'Values' && r.path === 'replicaCount'));
     });
   });
 
