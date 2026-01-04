@@ -1,41 +1,121 @@
-# Helm Values Preview
+<div align="center">
 
-A VS Code extension that enhances working with Helm charts by providing:
+# 🎛️ Helm Values Preview
 
-- **Status bar values file selector** - Quickly switch between values override files
-- **Inlay hints** - See resolved template values inline in your template files
-- **Go-to-definition** - Click on inlay hints to jump to where values are defined
-- **Subchart support** - Works with Helm chart dependencies in `charts/` directory
+**A VS Code extension that supercharges Helm chart development**
 
-## Features
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-blue.svg)](https://code.visualstudio.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 
-### Values File Selector
+*See resolved template values inline, navigate to definitions, and switch between environments instantly.*
 
-A dropdown in the status bar lets you select which values override file to use. The selected file is merged with the default `values.yaml` to compute resolved values.
+</div>
 
-![Status Bar](docs/status-bar.png)
+---
 
-### Inlay Hints
+## ✨ Features
 
-When editing Helm template files, inlay hints display the resolved values for `.Values.x.y.z` expressions. Values are computed by deep-merging the default `values.yaml` with your selected override file.
+### 📊 Inline Value Decorations
 
-![Inlay Hints](docs/inlay-hints.png)
+See resolved `.Values.*` expressions directly in your template files. Values update instantly when you switch between environments—no need to run `helm template` repeatedly.
 
-### Subchart Support
+- Values shown inline after each template expression
+- Unset values highlighted with warnings
+- Truncated display for long values (configurable)
 
-The extension automatically detects when you're editing templates within a subchart (dependency) and resolves values correctly:
+### 🔄 Values File Selector
 
-- **Automatic detection**: Subcharts in the `charts/` directory are automatically detected
-- **Alias support**: Chart dependencies with aliases in `Chart.yaml` are properly resolved
-- **Helm-compatible value merging**: Values follow Helm's merge behavior:
-  1. Subchart's own `values.yaml` defaults
-  2. Parent chart values under the subchart key (alias or name)
-  3. Global values from parent (`global:` section)
-- **Status bar indicator**: Shows which subchart you're editing (e.g., `📦 database > 📄 values-prod.yaml`). For nested subcharts, shows abbreviated path with full path in tooltip
-- **Go-to-definition**: Navigates to value source in parent or subchart values files, following the full ancestor chain for nested subcharts
-- **Find All References**: Works from any values file (root, intermediate subchart, or leaf subchart) to find template usage across the chart hierarchy
+Quickly switch between values override files using the status bar dropdown. The selected file is merged with `values.yaml` following Helm's merge behavior.
 
-**Example**: If your parent chart has:
+> **Status bar shows:** `📄 values-prod.yaml` or `📦 subchart > 📄 values-prod.yaml` for subcharts
+
+### 🔍 Go-to-Definition
+
+**Ctrl/Cmd+Click** on any value decoration to jump directly to where that value is defined—whether it's in your override file, default `values.yaml`, or a subchart's values.
+
+### 📚 Find All References
+
+Right-click on any key in a values file and select "Find All References" to see every template that uses that value across your chart and subcharts.
+
+### 💡 Quick Fixes for Missing Values
+
+When a `.Values.*` reference doesn't exist, the extension shows a warning decoration and offers a **Quick Fix** to create the missing key in your `values.yaml`.
+
+### 📦 Full Subchart Support
+
+Works seamlessly with Helm dependencies:
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-detection** | Subcharts in `charts/` directory automatically detected |
+| **Alias support** | Dependencies with aliases in `Chart.yaml` properly resolved |
+| **Nested subcharts** | Full support for subcharts within subcharts |
+| **Archive support** | Works with `.tgz` packaged subcharts (read-only) |
+| **Global values** | `global:` section properly inherited |
+
+### 🎯 Autocomplete for Subchart Values
+
+When editing values files, get intelligent autocomplete suggestions for subchart configuration keys based on their default `values.yaml`.
+
+---
+
+## 🚀 Getting Started
+
+1. **Install** the extension from the VS Code marketplace
+2. **Open** a workspace containing a Helm chart (must have `Chart.yaml`)
+3. **Edit** any template file in the `templates/` directory
+4. **Click** the status bar item to select a values override file
+5. **Enjoy** inline value previews and instant navigation!
+
+---
+
+## ⚙️ Configuration
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `helmValues.enableInlayHints` | Enable/disable inline value decorations | `true` |
+| `helmValues.inlayHintMaxLength` | Maximum characters before value is truncated | `50` |
+
+---
+
+## 📋 Commands
+
+| Command | Description |
+|---------|-------------|
+| `Helm: Select Values File` | Open the values file picker |
+| `Helm: Clear Values File Selection` | Reset to default `values.yaml` only |
+| `Helm: Go to Value Definition` | Navigate to the value source |
+| `Helm: Create Missing Value` | Add undefined value to `values.yaml` |
+
+---
+
+## 📁 Supported Patterns
+
+### Template Expressions
+
+```yaml
+{{ .Values.foo }}
+{{- .Values.foo -}}
+{{ $.Values.foo }}
+{{ .Values.foo | default "bar" }}
+{{ if .Values.enabled }}...{{ end }}
+```
+
+### Values File Patterns
+
+The extension discovers override files matching these patterns:
+
+- `values-*.yaml` → `values-prod.yaml`, `values-dev.yaml`
+- `*.values.yaml` → `prod.values.yaml`
+- `*-values.yaml` → `production-values.yaml`
+- `values.*.yaml` → `values.prod.yaml`
+- `values/*.yaml` → `values/staging.yaml`
+
+---
+
+## 📦 Subchart Example
+
 ```yaml
 # Chart.yaml
 dependencies:
@@ -46,61 +126,20 @@ dependencies:
 # values.yaml
 database:
   auth:
-    rootPassword: "parent-secret"
+    rootPassword: "my-secret"
 global:
   environment: production
 ```
 
-When editing `charts/mysql/templates/deployment.yaml`, `.Values.auth.rootPassword` resolves to `"parent-secret"` and `.Values.global.environment` resolves to `"production"`.
+When editing `charts/mysql/templates/deployment.yaml`:
+- `.Values.auth.rootPassword` → `"my-secret"` (from parent)
+- `.Values.global.environment` → `"production"` (inherited global)
 
-**Nested Subcharts**: The extension fully supports nested subcharts (subcharts within subcharts). When editing templates in deeply nested charts, values are resolved following the full ancestor chain with proper alias resolution at each level.
+Archive subcharts (`.tgz`) are supported for value resolution and autocomplete, but navigation into archives is read-only.
 
-**Note**: Only expanded subchart directories are supported, not `.tgz` archives.
+---
 
-### Supported Patterns
-
-Template expressions:
-- `{{ .Values.foo }}`
-- `{{- .Values.foo -}}`
-- `{{ $.Values.foo }}`
-- `{{ .Values.foo | default "bar" }}`
-
-Values file patterns:
-- `values-*.yaml` (e.g., `values-prod.yaml`)
-- `*.values.yaml` (e.g., `prod.values.yaml`)
-- `*-values.yaml` (e.g., `prod-values.yaml`)
-- `values.*.yaml` (e.g., `values.prod.yaml`)
-- `values/*.yaml` (e.g., `values/staging.yaml`)
-
-## Requirements
-
-- VS Code 1.85.0 or higher
-- A workspace containing Helm charts (directories with `Chart.yaml`)
-
-## Extension Settings
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `helmValues.enableInlayHints` | Enable/disable inlay hints | `true` |
-| `helmValues.inlayHintMaxLength` | Maximum length of inlay hint text | `50` |
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `Helm: Select Values File` | Open the values file picker |
-| `Helm: Clear Values File Selection` | Clear the current selection |
-| `Helm: Go to Value Definition` | Navigate to the value definition |
-
-## Usage
-
-1. Open a workspace containing a Helm chart
-2. Open a template file (e.g., `templates/deployment.yaml`)
-3. Click the status bar item to select a values override file
-4. Inlay hints will appear showing resolved values
-5. Click on a hint to jump to the value definition
-
-## Development
+## 🛠️ Development
 
 ```bash
 # Install dependencies
@@ -109,7 +148,7 @@ npm install
 # Compile
 npm run compile
 
-# Watch mode
+# Watch mode (for development)
 npm run watch
 
 # Run tests
@@ -117,8 +156,33 @@ npm test
 
 # Lint
 npm run lint
+
+# Format code
+npm run format
 ```
 
-## License
+### Debugging
 
-MIT
+1. Open the project in VS Code
+2. Press **F5** to launch the Extension Development Host
+3. Open a folder containing a Helm chart to test
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see the [AGENTS.md](AGENTS.md) file for development guidelines and architecture documentation.
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)
+
+---
+
+<div align="center">
+
+**[Report Bug](https://github.com/beeemt/vscode-helm/issues) · [Request Feature](https://github.com/beeemt/vscode-helm/issues)**
+
+</div>

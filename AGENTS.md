@@ -72,6 +72,7 @@ npm test -- --grep "HelmChartService"
 src/
 ├── extension.ts                    # Entry point (activate/deactivate)
 ├── providers/
+│   ├── codeActionProvider.ts       # Quick fixes for missing values
 │   ├── valuesDecorationProvider.ts # Text decorations for .Values references
 │   ├── decorationHoverProvider.ts  # Hover tooltips for decorations
 │   ├── definitionProvider.ts       # Go-to-definition (Cmd/Ctrl+Click)
@@ -279,6 +280,27 @@ The extension provides autocomplete suggestions in values files to help users co
 4. Update README.md if adding user-facing features
 5. Keep commits focused and atomic
 
+## Documentation Maintenance
+
+**Keep documentation in sync with code changes:**
+
+1. **README.md**: Update when adding/removing/changing user-facing features, commands, settings, or supported patterns
+2. **AGENTS.md**: Update when changing architecture, adding new providers/services, or modifying key design decisions
+3. **package.json**: Keep `description` field current with main feature summary
+
+**When to update docs:**
+- New provider or service added → Update project structure in AGENTS.md
+- New command or setting → Update README.md Commands/Configuration tables
+- Architecture change → Update relevant section in AGENTS.md
+- Bug fix for documented limitation → Remove or update the limitation note
+- New file patterns supported → Update README.md patterns list
+
+**Documentation checklist for PRs:**
+- [ ] README.md reflects current features accurately
+- [ ] AGENTS.md project structure matches actual `src/` layout
+- [ ] No references to deprecated approaches (e.g., "inlay hints" when using decorations)
+- [ ] Common Issues section reflects actual current issues
+
 ## Debugging
 
 1. Set breakpoints in VS Code
@@ -292,7 +314,7 @@ The extension provides autocomplete suggestions in values files to help users co
 - Ensure workspace contains a `Chart.yaml` file
 - Check that the file is valid YAML
 
-### Inlay hints not showing
+### Value decorations not showing
 - Verify file is in a `templates/` directory
 - Check `helmValues.enableInlayHints` setting is true
 - Ensure `values.yaml` exists and is valid YAML

@@ -1,9 +1,10 @@
 {
     "name": "vscode-helm-values",
     "displayName": "Helm Values",
-    "description": "Preview resolved Helm template values with inlay hints and values file selection",
+    "description": "Preview resolved Helm template values inline with go-to-definition, find references, and values file selection",
     "version": "0.1.0",
     "publisher": "beeemT",
+    "icon": "images/icon.png",
     "engines": {
         "vscode": "^1.85.0"
     },
