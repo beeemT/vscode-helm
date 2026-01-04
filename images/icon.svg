@@ -1,61 +1,61 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0F3460"/>
-      <stop offset="100%" style="stop-color:#16213E"/>
-    </linearGradient>
-    <linearGradient id="helmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#00D9FF"/>
-      <stop offset="100%" style="stop-color:#0091EA"/>
-    </linearGradient>
-    <linearGradient id="valueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#7C4DFF"/>
-      <stop offset="100%" style="stop-color:#536DFE"/>
-    </linearGradient>
-  </defs>
-  
-  <!-- Background -->
-  <rect width="128" height="128" rx="16" fill="url(#bgGrad)"/>
-  
-  <!-- Helm wheel (simplified) -->
-  <g transform="translate(64, 58)">
-    <!-- Outer ring -->
-    <circle cx="0" cy="0" r="32" fill="none" stroke="url(#helmGrad)" stroke-width="4"/>
-    
-    <!-- Inner hub -->
-    <circle cx="0" cy="0" r="10" fill="url(#helmGrad)"/>
-    
-    <!-- Spokes (8 spokes like a ship's wheel) -->
-    <g stroke="url(#helmGrad)" stroke-width="4" stroke-linecap="round">
-      <line x1="0" y1="-10" x2="0" y2="-32"/>
-      <line x1="0" y1="10" x2="0" y2="32"/>
-      <line x1="-10" y1="0" x2="-32" y2="0"/>
-      <line x1="10" y1="0" x2="32" y2="0"/>
-      <line x1="-7" y1="-7" x2="-22.6" y2="-22.6"/>
-      <line x1="7" y1="7" x2="22.6" y2="22.6"/>
-      <line x1="-7" y1="7" x2="-22.6" y2="22.6"/>
-      <line x1="7" y1="-7" x2="22.6" y2="-22.6"/>
+    <defs>
+        <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#0F3460"/>
+            <stop offset="100%" style="stop-color:#16213E"/>
+        </linearGradient>
+        <linearGradient id="helmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#00D9FF"/>
+            <stop offset="100%" style="stop-color:#0091EA"/>
+        </linearGradient>
+        <linearGradient id="valueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#7C4DFF"/>
+            <stop offset="100%" style="stop-color:#536DFE"/>
+        </linearGradient>
+    </defs>
+
+    <!-- Background -->
+    <rect width="128" height="128" rx="16" fill="url(#bgGrad)"/>
+
+    <!-- Helm wheel (simplified) -->
+    <g transform="translate(64, 58)">
+        <!-- Outer ring -->
+        <circle cx="0" cy="0" r="32" fill="none" stroke="url(#helmGrad)" stroke-width="4"/>
+
+        <!-- Inner hub -->
+        <circle cx="0" cy="0" r="10" fill="url(#helmGrad)"/>
+
+        <!-- Spokes (8 spokes like a ship's wheel) -->
+        <g stroke="url(#helmGrad)" stroke-width="4" stroke-linecap="round">
+            <line x1="0" y1="-10" x2="0" y2="-32"/>
+            <line x1="0" y1="10" x2="0" y2="32"/>
+            <line x1="-10" y1="0" x2="-32" y2="0"/>
+            <line x1="10" y1="0" x2="32" y2="0"/>
+            <line x1="-7" y1="-7" x2="-22.6" y2="-22.6"/>
+            <line x1="7" y1="7" x2="22.6" y2="22.6"/>
+            <line x1="-7" y1="7" x2="-22.6" y2="22.6"/>
+            <line x1="7" y1="-7" x2="22.6" y2="-22.6"/>
+        </g>
+
+        <!-- Handles at spoke ends -->
+        <g fill="url(#helmGrad)">
+            <circle cx="0" cy="-32" r="5"/>
+            <circle cx="0" cy="32" r="5"/>
+            <circle cx="-32" cy="0" r="5"/>
+            <circle cx="32" cy="0" r="5"/>
+            <circle cx="-22.6" cy="-22.6" r="5"/>
+            <circle cx="22.6" cy="22.6" r="5"/>
+            <circle cx="-22.6" cy="22.6" r="5"/>
+            <circle cx="22.6" cy="-22.6" r="5"/>
+        </g>
     </g>
-    
-    <!-- Handles at spoke ends -->
-    <g fill="url(#helmGrad)">
-      <circle cx="0" cy="-32" r="5"/>
-      <circle cx="0" cy="32" r="5"/>
-      <circle cx="-32" cy="0" r="5"/>
-      <circle cx="32" cy="0" r="5"/>
-      <circle cx="-22.6" cy="-22.6" r="5"/>
-      <circle cx="22.6" cy="22.6" r="5"/>
-      <circle cx="-22.6" cy="22.6" r="5"/>
-      <circle cx="22.6" cy="-22.6" r="5"/>
+
+    <!-- Values indicator badge -->
+    <g transform="translate(88, 98)">
+        <rect x="-20" y="-12" width="40" height="24" rx="6" fill="url(#valueGrad)"/>
+        <text x="0" y="5" font-family="monospace" font-size="14" font-weight="bold" fill="white" text-anchor="middle">.val</text>
     </g>
-  </g>
-  
-  <!-- Values indicator badge -->
-  <g transform="translate(88, 98)">
-    <rect x="-20" y="-12" width="40" height="24" rx="6" fill="url(#valueGrad)"/>
-    <text x="0" y="5" font-family="monospace" font-size="14" font-weight="bold" fill="white" text-anchor="middle">.val</text>
-  </g>
-  
-  <!-- Subtle glow effect -->
-  <circle cx="64" cy="58" r="36" fill="none" stroke="#00D9FF" stroke-width="1" opacity="0.3"/>
+
+    <!-- Subtle glow effect -->
+    <circle cx="64" cy="58" r="36" fill="none" stroke="#00D9FF" stroke-width="1" opacity="0.3"/>
 </svg>

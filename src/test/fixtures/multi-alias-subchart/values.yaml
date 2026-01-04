@@ -1,0 +1,17 @@
+# Default values for multi-alias-chart
+replicaCount: 1
+
+primary-db:
+  enabled: true
+  auth:
+    username: primary-user
+    password: primary-pass
+
+secondary-db:
+  enabled: true
+  auth:
+    username: secondary-user
+    password: secondary-pass
+
+global:
+  imageRegistry: docker.io

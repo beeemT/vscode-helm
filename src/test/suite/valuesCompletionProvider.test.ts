@@ -316,6 +316,94 @@ suite('ValuesCompletionProvider', () => {
     });
   });
 
+  suite('multi-alias subchart completions', () => {
+    const multiAliasChartPath = path.join(fixturesPath, 'multi-alias-subchart');
+
+    test('suggests both aliases for the same subchart at root level', async () => {
+      const valuesPath = path.join(multiAliasChartPath, 'values.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+      assert.ok(Array.isArray(result), 'Should be an array');
+
+      // Should suggest both 'primary-db' and 'secondary-db'
+      const primaryDbItem = result.find((item) => item.label === 'primary-db');
+      assert.ok(primaryDbItem, 'Should suggest primary-db key');
+      assert.strictEqual(
+        primaryDbItem?.kind,
+        vscode.CompletionItemKind.Module,
+        'primary-db should be Module kind'
+      );
+
+      const secondaryDbItem = result.find((item) => item.label === 'secondary-db');
+      assert.ok(secondaryDbItem, 'Should suggest secondary-db key');
+      assert.strictEqual(
+        secondaryDbItem?.kind,
+        vscode.CompletionItemKind.Module,
+        'secondary-db should be Module kind'
+      );
+    });
+
+    test('suggests nested values for each alias independently', async () => {
+      const valuesPath = path.join(multiAliasChartPath, 'values.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+
+      // Find position inside 'primary-db:' section
+      const text = document.getText();
+      const lines = text.split('\n');
+      let primaryDbLineNum = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('primary-db:')) {
+          primaryDbLineNum = i;
+          break;
+        }
+      }
+
+      assert.ok(primaryDbLineNum >= 0, 'Should find primary-db: line');
+
+      // Position on next line (inside primary-db: block)
+      const position = new vscode.Position(primaryDbLineNum + 1, 2);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+
+      // Should suggest keys from mysql defaults
+      const authItem = result.find((item) => item.label === 'auth');
+      assert.ok(authItem, 'Should suggest auth key from mysql defaults');
+
+      const resourcesItem = result.find((item) => item.label === 'resources');
+      assert.ok(resourcesItem, 'Should suggest resources key from mysql defaults');
+    });
+
+    test('documentation indicates alias relationship', async () => {
+      const valuesPath = path.join(multiAliasChartPath, 'values.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+
+      // Check that documentation mentions the alias relationship
+      const primaryDbItem = result.find((item) => item.label === 'primary-db');
+      assert.ok(primaryDbItem, 'Should find primary-db item');
+
+      const docString = primaryDbItem?.documentation;
+      assert.ok(docString, 'Should have documentation');
+
+      // Check documentation contains info about alias
+      const docText = typeof docString === 'string' ? docString : (docString as vscode.MarkdownString).value;
+      assert.ok(
+        docText.includes('mysql') || docText.includes('Subchart'),
+        'Documentation should mention the subchart name or indicate it is a subchart'
+      );
+    });
+  });
+
   suite('global completions', () => {
     test('suggests common global keys inside global: section', async () => {
       const valuesPath = path.join(parentWithDepsPath, 'values.yaml');

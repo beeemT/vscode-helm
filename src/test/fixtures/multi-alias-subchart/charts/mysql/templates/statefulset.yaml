@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-mysql
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:{{ .Chart.AppVersion }}
+          env:
+            - name: MYSQL_USER
+              value: {{ .Values.auth.username }}
+            - name: MYSQL_DATABASE
+              value: {{ .Values.auth.database }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

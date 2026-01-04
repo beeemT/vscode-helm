@@ -268,6 +268,7 @@ export class HelmChartService {
   /**
    * Discover subcharts in the charts/ directory of a chart.
    * Discovers both expanded directories and .tgz archives.
+   * Supports multiple dependencies with different aliases pointing to the same chart.
    */
   public async discoverSubcharts(chartRoot: string): Promise<SubchartInfo[]> {
     const subcharts: SubchartInfo[] = [];
@@ -299,18 +300,33 @@ export class HelmChartService {
       const subchartRoot = path.dirname(chartFile.fsPath);
       const subchartDirName = path.basename(subchartRoot);
 
-      // Find matching dependency for alias and condition
-      const matchingDep = dependencies.find(
+      // Find ALL matching dependencies for alias and condition
+      // This handles the case where the same chart is referenced multiple times with different aliases
+      const matchingDeps = dependencies.filter(
         (dep) => dep.name === subchartDirName || dep.alias === subchartDirName
       );
 
-      subcharts.push({
-        name: subchartDirName,
-        alias: matchingDep?.alias,
-        chartRoot: subchartRoot,
-        condition: matchingDep?.condition,
-        isArchive: false,
-      });
+      if (matchingDeps.length > 0) {
+        // Create a SubchartInfo for each matching dependency (handles multiple aliases)
+        for (const dep of matchingDeps) {
+          subcharts.push({
+            name: subchartDirName,
+            alias: dep.alias,
+            chartRoot: subchartRoot,
+            condition: dep.condition,
+            isArchive: false,
+          });
+        }
+      } else {
+        // No matching dependency found, create a single entry without alias
+        subcharts.push({
+          name: subchartDirName,
+          alias: undefined,
+          chartRoot: subchartRoot,
+          condition: undefined,
+          isArchive: false,
+        });
+      }
     }
 
     // Find all .tgz archives in charts/
@@ -322,23 +338,43 @@ export class HelmChartService {
       const archivePath = archiveFile.fsPath;
       const chartName = await archiveReader.getChartName(archivePath);
 
-      // Find matching dependency for alias and condition
-      // Dependency name should match the chart name from the archive
-      const matchingDep = dependencies.find(
+      // Find ALL matching dependencies for alias and condition
+      // This handles the case where the same chart is referenced multiple times with different aliases
+      const matchingDeps = dependencies.filter(
         (dep) => dep.name === chartName || dep.alias === chartName
       );
 
-      subcharts.push({
-        name: chartName,
-        alias: matchingDep?.alias,
-        chartRoot: archivePath, // For archives, chartRoot is the archive path
-        condition: matchingDep?.condition,
-        isArchive: true,
-        archivePath: archivePath,
-      });
+      if (matchingDeps.length > 0) {
+        // Create a SubchartInfo for each matching dependency (handles multiple aliases)
+        for (const dep of matchingDeps) {
+          subcharts.push({
+            name: chartName,
+            alias: dep.alias,
+            chartRoot: archivePath, // For archives, chartRoot is the archive path
+            condition: dep.condition,
+            isArchive: true,
+            archivePath: archivePath,
+          });
+        }
+      } else {
+        // No matching dependency found, create a single entry without alias
+        subcharts.push({
+          name: chartName,
+          alias: undefined,
+          chartRoot: archivePath,
+          condition: undefined,
+          isArchive: true,
+          archivePath: archivePath,
+        });
+      }
     }
 
-    return subcharts.sort((a, b) => a.name.localeCompare(b.name));
+    return subcharts.sort((a, b) => {
+      // Sort by effective key (alias or name) for consistent ordering
+      const keyA = a.alias || a.name;
+      const keyB = b.alias || b.name;
+      return keyA.localeCompare(keyB);
+    });
   }
 
   /**

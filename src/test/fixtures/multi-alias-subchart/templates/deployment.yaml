@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-app
+spec:
+  replicas: {{ .Values.replicaCount }}
+  template:
+    spec:
+      containers:
+        - name: app
+          env:
+            - name: PRIMARY_DB_USER
+              value: {{ .Values.primary-db.auth.username }}
+            - name: SECONDARY_DB_USER
+              value: {{ .Values.secondary-db.auth.username }}

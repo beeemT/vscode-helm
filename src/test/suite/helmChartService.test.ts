@@ -322,6 +322,36 @@ suite('HelmChartService', () => {
       assert.ok(archiveSubchart, 'Should find mysubchart');
       assert.strictEqual(archiveSubchart!.alias, 'archived', 'Should have alias from dependencies');
     });
+
+    test('discovers multiple aliases for the same subchart', async () => {
+      const multiAliasChartPath = path.join(fixturesPath, 'multi-alias-subchart');
+      const subcharts = await service.discoverSubcharts(multiAliasChartPath);
+
+      // Should have 2 entries for mysql with different aliases
+      const mysqlSubcharts = subcharts.filter((s) => s.name === 'mysql');
+      assert.strictEqual(mysqlSubcharts.length, 2, 'Should find 2 entries for mysql');
+
+      // Check both aliases are present
+      const aliases = mysqlSubcharts.map((s) => s.alias).sort();
+      assert.deepStrictEqual(aliases, ['primary-db', 'secondary-db'], 'Should have both aliases');
+
+      // Check conditions are preserved
+      const primaryDb = mysqlSubcharts.find((s) => s.alias === 'primary-db');
+      assert.ok(primaryDb, 'Should find primary-db');
+      assert.strictEqual(primaryDb!.condition, 'primary-db.enabled', 'Should have correct condition');
+
+      const secondaryDb = mysqlSubcharts.find((s) => s.alias === 'secondary-db');
+      assert.ok(secondaryDb, 'Should find secondary-db');
+      assert.strictEqual(secondaryDb!.condition, 'secondary-db.enabled', 'Should have correct condition');
+    });
+
+    test('getSubchartValuesKey returns different keys for different aliases of same subchart', async () => {
+      const multiAliasChartPath = path.join(fixturesPath, 'multi-alias-subchart');
+      const subcharts = await service.discoverSubcharts(multiAliasChartPath);
+
+      const keys = subcharts.filter((s) => s.name === 'mysql').map((s) => service.getSubchartValuesKey(s)).sort();
+      assert.deepStrictEqual(keys, ['primary-db', 'secondary-db'], 'Should return alias as key for each entry');
+    });
   });
 
   suite('getSubchartValuesKey', () => {

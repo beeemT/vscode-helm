@@ -9,4 +9,3 @@ dependencies:
   - name: parent
     version: "1.0.0"
     alias: parentAlias
-    condition: parentAlias.enabled

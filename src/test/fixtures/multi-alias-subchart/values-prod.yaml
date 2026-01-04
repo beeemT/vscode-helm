@@ -1,0 +1,10 @@
+# Production overrides
+replicaCount: 3
+
+primary-db:
+  auth:
+    password: secure-primary-pass
+
+secondary-db:
+  auth:
+    password: secure-secondary-pass

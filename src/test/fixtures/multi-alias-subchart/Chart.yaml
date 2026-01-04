@@ -1,0 +1,15 @@
+apiVersion: v2
+name: multi-alias-chart
+description: A chart with the same subchart referenced twice with different aliases
+version: 1.0.0
+appVersion: "1.0"
+
+dependencies:
+  - name: mysql
+    version: "1.0.0"
+    alias: primary-db
+    condition: primary-db.enabled
+  - name: mysql
+    version: "1.0.0"
+    alias: secondary-db
+    condition: secondary-db.enabled
