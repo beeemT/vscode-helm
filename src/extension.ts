@@ -4,6 +4,7 @@ import { HelmDecorationHoverProvider } from './providers/decorationHoverProvider
 import { HelmDefinitionProvider } from './providers/definitionProvider';
 import { HelmReferenceProvider } from './providers/referenceProvider';
 import { StatusBarProvider } from './providers/statusBarProvider';
+import { ValuesCompletionProvider } from './providers/valuesCompletionProvider';
 import { ValuesDecorationProvider } from './providers/valuesDecorationProvider';
 import { FileWatcher } from './services/fileWatcher';
 import { HelmChartService } from './services/helmChartService';
@@ -87,6 +88,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       referenceProvider
     )
   );
+
+  // Register completion provider for values files
+  // Provides autocomplete suggestions for subchart keys and their nested values
+  // Trigger characters: newline (after adding new key), colon (after key:)
+  const completionProvider = ValuesCompletionProvider.getInstance();
+  const valuesFilePatterns = [
+    '**/values*.{yaml,yml}',
+    '**/*.values.{yaml,yml}',
+    '**/*-values.{yaml,yml}',
+    '**/values/*.{yaml,yml}',
+  ];
+  for (const pattern of valuesFilePatterns) {
+    context.subscriptions.push(
+      vscode.languages.registerCompletionItemProvider(
+        { language: 'yaml', pattern },
+        completionProvider,
+        '\n', ':', ' '
+      )
+    );
+  }
 
   // Register code action provider for quick fixes on unset values
   // Pattern **/templates/** covers all files including .tpl

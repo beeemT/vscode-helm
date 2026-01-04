@@ -8,6 +8,7 @@ VS Code extension for Helm chart development. Provides:
 - Go-to-definition for value sources (Cmd/Ctrl+Click)
 - Find all references from values files to templates
 - Hover tooltips on decorations with value details
+- Autocomplete for subchart values in values files
 
 TypeScript-based VS Code extension using `js-yaml` for YAML parsing.
 
@@ -75,7 +76,8 @@ src/
 │   ├── decorationHoverProvider.ts  # Hover tooltips for decorations
 │   ├── definitionProvider.ts       # Go-to-definition (Cmd/Ctrl+Click)
 │   ├── referenceProvider.ts        # Find all references from values files
-│   └── statusBarProvider.ts        # Status bar values file selector
+│   ├── statusBarProvider.ts        # Status bar values file selector
+│   └── valuesCompletionProvider.ts # Autocomplete for subchart values
 ├── services/
 │   ├── archiveReader.ts            # Read .tgz archive subcharts
 │   ├── helmChartService.ts         # Chart detection + values discovery
@@ -239,6 +241,35 @@ interface SubchartInfo {
 - Cannot edit templates inside archives (read-only)
 - No line-level navigation into archives (definition/references)
 - Archive must be valid gzipped tar format
+
+### Values File Autocomplete Architecture
+
+The extension provides autocomplete suggestions in values files to help users configure subchart values.
+
+**ValuesCompletionProvider**:
+- Registered for all values file patterns: `values*.yaml`, `*.values.yaml`, `*-values.yaml`, `values/*.yaml`
+- Trigger characters: newline, colon, space (for natural YAML editing flow)
+- Only active for root charts with discovered subcharts (not subchart values files)
+
+**Completion Types**:
+1. **Root-level completions**: Subchart keys (using `CompletionItemKind.Module`) and `global:`
+2. **Nested completions**: Keys from subchart default `values.yaml` (using `Property`/`Value` kinds)
+3. **Global completions**: Common global keys (imageRegistry, storageClass, etc.) plus keys from subchart global defaults
+
+**YAML Path Detection**:
+- Uses indentation-based walking similar to `getValuePathAtPosition()` in `referenceProvider.ts`
+- Determines current path hierarchy by walking backwards through document lines
+- Matches path segments to subchart keys for context-aware suggestions
+
+**Archive Subchart Support**:
+- Uses `loadSubchartDefaults(subchartInfo)` which handles both directories and archives
+- Archive-sourced completions show 📦 indicator in detail text
+- Works seamlessly with `.tgz` subcharts via `ArchiveReader`
+
+**Snippet Insertion**:
+- Object-type values insert `key:\n  $0` (with newline and cursor placement)
+- Scalar values insert `key: "${1:defaultValue}"` with placeholder
+- Enables rapid value entry with tab completion
 
 ## PR Guidelines
 
