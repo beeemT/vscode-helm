@@ -1,5 +1,5 @@
 import * as yaml from 'js-yaml';
-import { HelmChartService } from './helmChartService';
+import { HelmChartContext, HelmChartService } from './helmChartService';
 
 /**
  * Cached values data for a Helm chart
@@ -89,23 +89,103 @@ export class ValuesCache {
 
   /**
    * Get values for a subchart as the subchart would see them.
-   * Follows Helm's merge behavior:
+   * Follows Helm's merge behavior for nested subcharts:
    * 1. Start with subchart's own values.yaml defaults
-   * 2. Merge parent's values under the subchart key (alias or name)
-   * 3. Include global values from parent
+   * 2. Merge ancestor values following the chain from root to leaf
+   *    - Root chart values under nestedKey path (e.g., parent.child for nested subchart)
+   *    - Each intermediate parent's values under their respective subchart keys
+   * 3. Include global values from the root ancestor
    *
-   * @param parentChartRoot Root of the parent chart
-   * @param subchartRoot Root of the subchart
-   * @param subchartKey The key used in parent's values.yaml (alias or name)
-   * @param parentOverrideFile Selected override file in parent chart
+   * @param chartContext The subchart's HelmChartContext (must have parentChart set)
+   * @param rootOverrideFile Selected override file in root ancestor chart
    */
   public async getValuesForSubchart(
+    chartContext: HelmChartContext,
+    rootOverrideFile: string
+  ): Promise<Record<string, unknown>> {
+    if (!chartContext.isSubchart || !chartContext.parentChart) {
+      // Not a subchart, use regular values loading
+      const rootChart = HelmChartService.getInstance().getRootAncestorChart(chartContext);
+      return this.getValues(rootChart.chartRoot, rootOverrideFile);
+    }
+
+    const helmService = HelmChartService.getInstance();
+
+    // Build cache key including full ancestor chain
+    const cacheKey = helmService.buildSubchartCacheKey(chartContext, rootOverrideFile);
+    const cached = this.subchartCache.get(cacheKey);
+    if (cached && cached.parentOverrideFile === rootOverrideFile) {
+      return cached.merged;
+    }
+
+    // 1. Load subchart's own default values
+    let subchartDefaults: Record<string, unknown> = {};
+    const subchartValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
+    if (subchartValuesPath) {
+      try {
+        const content = await helmService.readFileContents(subchartValuesPath);
+        subchartDefaults = (yaml.load(content) as Record<string, unknown>) || {};
+      } catch (error) {
+        console.error(`Failed to parse subchart default values: ${error}`);
+      }
+    }
+
+    // 2. Build the ancestor chain from root to this subchart
+    const chain = helmService.buildAncestorChain(chartContext);
+
+    // 3. Get root chart's merged values
+    const rootChart = chain[0].chart;
+    const rootValues = await this.getValues(rootChart.chartRoot, rootOverrideFile);
+
+    // 4. Build the nested key path for this subchart in root's values
+    // e.g., for grandparent > parent > leaf, the path would be "parentKey.leafKey"
+    const keyPath: string[] = [];
+    for (let i = 1; i < chain.length; i++) {
+      const key = chain[i].subchartKey;
+      if (key) {
+        keyPath.push(key);
+      }
+    }
+
+    // 5. Extract values for this subchart from root (following nested path)
+    let ancestorSubchartValues: Record<string, unknown> = rootValues;
+    for (const key of keyPath) {
+      ancestorSubchartValues =
+        (ancestorSubchartValues[key] as Record<string, unknown>) || {};
+    }
+
+    // 6. Extract global values from root
+    const globalValues = (rootValues['global'] as Record<string, unknown>) || {};
+
+    // 7. Merge: subchart defaults <- ancestor values under nested path
+    let merged = this.deepMerge(subchartDefaults, ancestorSubchartValues);
+
+    // 8. Add global values (accessible as .Values.global in subchart)
+    if (Object.keys(globalValues).length > 0) {
+      merged = this.deepMerge(merged, { global: globalValues });
+    }
+
+    // Cache the result
+    this.subchartCache.set(cacheKey, {
+      merged,
+      timestamp: Date.now(),
+      parentOverrideFile: rootOverrideFile,
+    });
+
+    return merged;
+  }
+
+  /**
+   * Legacy method for backward compatibility - delegates to new signature
+   * @deprecated Use getValuesForSubchart(chartContext, rootOverrideFile) instead
+   */
+  public async getValuesForSubchartLegacy(
     parentChartRoot: string,
     subchartRoot: string,
     subchartKey: string,
     parentOverrideFile: string
   ): Promise<Record<string, unknown>> {
-    // Check subchart cache
+    // Check subchart cache with legacy key format
     const cacheKey = `${subchartRoot}:${parentOverrideFile}`;
     const cached = this.subchartCache.get(cacheKey);
     if (cached && cached.parentOverrideFile === parentOverrideFile) {
@@ -321,11 +401,106 @@ export class ValuesCache {
   }
 
   /**
+   * Find the position of a subchart value in the chain for nested subcharts.
+   * Searches through all ancestor values files from root to leaf:
+   * 1. Root override file (under nested path: parentKey.childKey.path)
+   * 2. Root default values.yaml (under nested path)
+   * 3. For global.* paths: check root files at root level (global.path)
+   * 4. Each intermediate parent's values files (under remaining path)
+   * 5. Subchart's own values.yaml (under path)
+   *
+   * @param chartContext The subchart's HelmChartContext
+   * @param rootOverrideFile Selected override file in root ancestor chart
+   * @param valuePath The value path to find (e.g., "config.setting")
+   */
+  public async findSubchartValuePositionInChainNested(
+    chartContext: HelmChartContext,
+    rootOverrideFile: string,
+    valuePath: string
+  ): Promise<ValuePosition | undefined> {
+    const helmService = HelmChartService.getInstance();
+    const chain = helmService.buildAncestorChain(chartContext);
+
+    // Build key path segments from root to this subchart
+    // e.g., for grandparent > parent > leaf, keyPath = ["parentKey", "leafKey"]
+    const keyPath: string[] = [];
+    for (let i = 1; i < chain.length; i++) {
+      const key = chain[i].subchartKey;
+      if (key) {
+        keyPath.push(key);
+      }
+    }
+
+    // Search from root to leaf, checking each level's files
+    for (let level = 0; level < chain.length; level++) {
+      const { chart } = chain[level];
+
+      // Build the path prefix for this level
+      // At level 0 (root): prefix is full keyPath (e.g., "parentKey.leafKey")
+      // At level 1: prefix is remaining keys (e.g., "leafKey")
+      // At leaf level: no prefix
+      const remainingKeys = keyPath.slice(level);
+      const pathPrefix = remainingKeys.length > 0 ? remainingKeys.join('.') + '.' : '';
+      const fullPath = pathPrefix + valuePath;
+
+      // Check override file (only root has override file selection)
+      if (level === 0 && rootOverrideFile) {
+        const overridePos = await this.findValuePosition(rootOverrideFile, fullPath, 'override');
+        if (overridePos) {
+          return overridePos;
+        }
+      }
+
+      // Check default values.yaml at this level
+      const defaultValuesPath = await helmService.getDefaultValuesPath(chart.chartRoot);
+      if (defaultValuesPath) {
+        const source: ValueSource = level === chain.length - 1 ? 'default' : 'parent-default';
+        const defaultPos = await this.findValuePosition(defaultValuesPath, fullPath, source);
+        if (defaultPos) {
+          return defaultPos;
+        }
+      }
+    }
+
+    // For global.* paths, also check root files at root level
+    if (valuePath.startsWith('global.')) {
+      const rootChart = chain[0].chart;
+
+      if (rootOverrideFile) {
+        const globalOverridePos = await this.findValuePosition(
+          rootOverrideFile,
+          valuePath,
+          'override'
+        );
+        if (globalOverridePos) {
+          return globalOverridePos;
+        }
+      }
+
+      const rootDefaultValuesPath = await helmService.getDefaultValuesPath(rootChart.chartRoot);
+      if (rootDefaultValuesPath) {
+        const globalDefaultPos = await this.findValuePosition(
+          rootDefaultValuesPath,
+          valuePath,
+          'parent-default'
+        );
+        if (globalDefaultPos) {
+          return globalDefaultPos;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Find the position of a subchart value in the chain:
    * 1. Parent override file (under subchartKey.path)
    * 2. Parent default values.yaml (under subchartKey.path)
    * 3. For global.* paths: check parent files at root level (global.path)
    * 4. Subchart's own values.yaml (under path)
+   *
+   * @deprecated Use findSubchartValuePositionInChainNested for nested subchart support
    */
   public async findSubchartValuePositionInChain(
     parentChartRoot: string,
@@ -491,11 +666,14 @@ export class ValuesCache {
     target: Record<string, unknown>,
     source: Record<string, unknown>
   ): Record<string, unknown> {
-    const result: Record<string, unknown> = { ...target };
+    // Defensive: ensure both arguments are valid objects
+    const safeTarget = target ?? {};
+    const safeSource = source ?? {};
+    const result: Record<string, unknown> = { ...safeTarget };
 
-    for (const key of Object.keys(source)) {
-      const sourceValue = source[key];
-      const targetValue = target[key];
+    for (const key of Object.keys(safeSource)) {
+      const sourceValue = safeSource[key];
+      const targetValue = safeTarget[key];
 
       if (
         sourceValue !== null &&

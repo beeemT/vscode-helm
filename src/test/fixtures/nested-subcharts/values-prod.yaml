@@ -1,0 +1,16 @@
+# Production override values
+global:
+  environment: production
+  logLevel: warn
+
+parentAlias:
+  name: parent-prod
+
+  leafAlias:
+    name: leaf-prod
+    config:
+      setting: prod-override
+      timeout: 120
+      maxRetries: 5
+
+replicaCount: 5

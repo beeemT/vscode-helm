@@ -1,12 +1,12 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { HelmChartContext, HelmChartService } from '../services/helmChartService';
+import { HelmChartContext, HelmChartService, SubchartInfo } from '../services/helmChartService';
 import { TemplateParser } from '../services/templateParser';
 
 /**
  * Provider for finding all references to a value key in Helm template files.
  * Enables "Find All References" from values.yaml to see where values are used.
- * Also supports finding references across parent/subchart boundaries.
+ * Also supports finding references across parent/subchart boundaries, including nested subcharts.
  */
 export class HelmReferenceProvider implements vscode.ReferenceProvider {
   private static instance: HelmReferenceProvider;
@@ -48,43 +48,126 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
     // Find all references in template files
     const locations = await this.findReferencesInTemplates(chartContext, valuePath);
 
-    // If this is a parent chart's values.yaml, also check if the path is a subchart key
-    // and find references within that subchart's templates
-    if (!chartContext.isSubchart && chartContext.subcharts.length > 0) {
-      const topLevelKey = valuePath.split('.')[0];
+    // If this chart has subcharts, check if the path is a subchart key
+    // and find references within that subchart's templates (including nested subcharts)
+    // This applies to both root charts and intermediate subcharts (parent subchart editing its leaf)
+    if (chartContext.subcharts.length > 0) {
+      const pathSegments = valuePath.split('.');
+      const topLevelKey = pathSegments[0];
 
       // Check if this is a global.* path - globals are available in all subcharts
       if (topLevelKey === 'global') {
-        // Search all subcharts for references to this global value
-        for (const subchart of chartContext.subcharts) {
-          const subchartLocations = await this.findReferencesInSubchartTemplates(
-            subchart.chartRoot,
-            valuePath // global.* paths are accessed the same way in subcharts
-          );
-          locations.push(...subchartLocations);
-        }
+        // Search all subcharts (including nested) for references to this global value
+        await this.findGlobalReferencesInAllSubcharts(chartContext, valuePath, locations);
       } else {
-        // Check if the path is under a subchart key (alias or name)
-        const matchingSubchart = chartContext.subcharts.find(
-          (sub) => sub.name === topLevelKey || sub.alias === topLevelKey
+        // Check if the path starts with a subchart key (alias or name)
+        // and recursively search through nested subcharts
+        await this.findReferencesInSubchartChain(
+          chartContext.subcharts,
+          pathSegments,
+          locations
         );
-
-        if (matchingSubchart) {
-          // The value path is under a subchart key
-          // Find references in subchart templates using the path without the subchart prefix
-          const subchartValuePath = valuePath.split('.').slice(1).join('.');
-          if (subchartValuePath) {
-            const subchartLocations = await this.findReferencesInSubchartTemplates(
-              matchingSubchart.chartRoot,
-              subchartValuePath
-            );
-            locations.push(...subchartLocations);
-          }
-        }
       }
     }
 
     return locations;
+  }
+
+  /**
+   * Find references to global values in all subcharts, including nested ones.
+   */
+  private async findGlobalReferencesInAllSubcharts(
+    chartContext: HelmChartContext,
+    valuePath: string,
+    locations: vscode.Location[]
+  ): Promise<void> {
+    // Recursively search all subcharts
+    const searchSubcharts = async (subcharts: SubchartInfo[]): Promise<void> => {
+      for (const subchart of subcharts) {
+        // Search in this subchart's templates
+        const subchartLocations = await this.findReferencesInSubchartTemplates(
+          subchart.chartRoot,
+          valuePath // global.* paths are accessed the same way in subcharts
+        );
+        if (subchartLocations && subchartLocations.length > 0) {
+          locations.push(...subchartLocations);
+        }
+
+        // Discover and search nested subcharts
+        const helmService = HelmChartService.getInstance();
+        const nestedSubcharts = await helmService.discoverSubcharts(subchart.chartRoot);
+        if (nestedSubcharts.length > 0) {
+          await searchSubcharts(nestedSubcharts);
+        }
+      }
+    };
+
+    await searchSubcharts(chartContext.subcharts);
+  }
+
+  /**
+   * Find references by following the subchart chain in the path.
+   * For example, if valuePath is "parentAlias.leafAlias.config.setting":
+   * 1. Find subchart with key "parentAlias"
+   * 2. Find nested subchart with key "leafAlias" within parent
+   * 3. Search for "config.setting" in leaf's templates
+   */
+  private async findReferencesInSubchartChain(
+    subcharts: SubchartInfo[],
+    pathSegments: string[],
+    locations: vscode.Location[]
+  ): Promise<void> {
+    if (pathSegments.length === 0 || subcharts.length === 0) {
+      return;
+    }
+
+    const currentKey = pathSegments[0];
+    const helmService = HelmChartService.getInstance();
+
+    // Find subchart matching the current key (by alias or name)
+    const matchingSubchart = subcharts.find(
+      (sub) => helmService.getSubchartValuesKey(sub) === currentKey
+    );
+
+    if (!matchingSubchart) {
+      return;
+    }
+
+    const remainingSegments = pathSegments.slice(1);
+
+    if (remainingSegments.length === 0) {
+      // No more path segments - this shouldn't really be a valid use case
+      // (clicking on just the subchart key itself)
+      return;
+    }
+
+    // Check if the next segment is another subchart key (nested subchart)
+    const nestedSubcharts = await helmService.discoverSubcharts(matchingSubchart.chartRoot);
+    const nextKey = remainingSegments[0];
+    const nestedSubchart = nestedSubcharts.find(
+      (sub) => helmService.getSubchartValuesKey(sub) === nextKey
+    );
+
+    if (nestedSubchart && remainingSegments.length > 1) {
+      // Continue down the subchart chain
+      await this.findReferencesInSubchartChain(
+        nestedSubcharts,
+        remainingSegments,
+        locations
+      );
+    } else {
+      // No more nested subcharts matching - search in current subchart's templates
+      const subchartValuePath = remainingSegments.join('.');
+      if (subchartValuePath) {
+        const subchartLocations = await this.findReferencesInSubchartTemplates(
+          matchingSubchart.chartRoot,
+          subchartValuePath
+        );
+        if (subchartLocations && subchartLocations.length > 0) {
+          locations.push(...subchartLocations);
+        }
+      }
+    }
   }
 
   /**

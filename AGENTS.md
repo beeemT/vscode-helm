@@ -138,12 +138,13 @@ All providers are registered for both languages.
 
 ### Subchart Support Architecture
 
-The extension supports Helm subcharts (dependencies) in the `charts/` directory. This is implemented with the following design:
+The extension supports Helm subcharts (dependencies) in the `charts/` directory, including **nested subcharts** (subcharts within subcharts). This is implemented with the following design:
 
 **Subchart Detection (`detectSubchartContext`)**:
 1. When a chart is detected, check if its parent directory is named `charts`
 2. If so, look for `Chart.yaml` one level up to find parent chart
 3. Read parent's `Chart.yaml` dependencies to resolve aliases
+4. **Recursively** check if the parent is also a subchart (with cycle detection via `Set<string>` of visited paths)
 
 **SubchartInfo Interface**:
 ```typescript
@@ -155,28 +156,46 @@ interface SubchartInfo {
 }
 ```
 
+**Ancestor Chain Utilities**:
+- `getRootAncestorChart(context)`: Walks up the parent chain to find the root chart
+- `buildAncestorChain(context)`: Returns array of `{ chart, subchartKey }` from root to leaf
+- `buildSubchartCacheKey(context, overrideFile)`: Creates unique cache key including full ancestor chain
+
 **Value Resolution for Subcharts (`getValuesForSubchart`)**:
-Follows Helm's merge behavior:
+Follows Helm's merge behavior for nested subcharts:
 1. Start with subchart's own `values.yaml` defaults
-2. Merge parent's values under the subchart key (alias or name)
-3. Include `global` values from parent chart
+2. Get root ancestor's merged values (default + selected override)
+3. Build nested key path (e.g., `parentAlias.leafAlias` for grandparent > parent > leaf)
+4. Extract values from root under the nested path
+5. Include `global` values from root chart
 
 **Key Design Decisions**:
-- **Parent Chart Drives State**: Subcharts use the parent chart's selected values file
-- **Alias Resolution**: Always check `Chart.yaml` dependencies for aliases
-- **Cache Strategy**: Subchart caches keyed by `{subchartRoot}:{parentOverrideFile}`
-- **Status Bar Display**: Shows `📦 subchartName > 📄 fileName` when in subchart
+- **Root Chart Drives State**: All subcharts (including nested) use the root ancestor's selected values file
+- **Alias Resolution**: Always check `Chart.yaml` dependencies for aliases at each level
+- **Cache Strategy**: Subchart caches keyed by full ancestor chain: `rootPath:parentKey:childKey:overrideFile`
+- **Status Bar Display**: Shows abbreviated path `📦 ...parent/leaf > 📄 fileName` with full path in tooltip for deeply nested charts
+- **Find References**: Works from any chart level (root, intermediate subchart, or leaf) by checking if the chart has subcharts, not just if it's a root chart. This enables finding references in nested subcharts when editing intermediate subchart values files
 
-**Value Position Resolution (`findSubchartValuePositionInChain`)**:
-Priority order for go-to-definition:
-1. Parent override file (under `subchartKey.path`)
-2. Parent default `values.yaml` (under `subchartKey.path`)
-3. Subchart's own `values.yaml` (under `path`)
+**Value Position Resolution (`findSubchartValuePositionInChainNested`)**:
+Priority order for go-to-definition in nested subcharts:
+1. Root override file (under nested path: `parentKey.leafKey.valuePath`)
+2. Root default `values.yaml` (under nested path)
+3. Each intermediate parent's `values.yaml` (under remaining path)
+4. Subchart's own `values.yaml` (under direct `valuePath`)
+5. For `global.*` paths: check root files at root level
+
+**Cycle Detection**:
+- Uses `Set<string>` of visited `chartRoot` paths during recursion
+- Prevents infinite loops from circular chart references
+
+**Reference Provider for Subcharts (`HelmReferenceProvider`)**:
+- Supports finding references from any values file (root, intermediate, or leaf subchart)
+- Uses `findReferencesInSubchartChain()` to recursively follow subchart key paths using alias resolution
+- Uses `findGlobalReferencesInAllSubcharts()` to search all nested subcharts for `global.*` references
+- Works when editing intermediate subchart values files by checking `chartContext.subcharts.length > 0` instead of `!chartContext.isSubchart`
 
 **Limitations**:
 - Only expanded directories supported, not `.tgz` archives
-- Nested subcharts (subcharts within subcharts) not supported
-- Parent context is not recursive to avoid infinite loops
 
 ## PR Guidelines
 

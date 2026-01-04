@@ -99,27 +99,25 @@ export class StatusBarProvider {
 
     this.currentChartContext = chartContext;
 
-    // For subcharts, get the selected file from the parent chart
-    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
-      ? chartContext.parentChart.chartRoot
-      : chartContext.chartRoot;
-    const selectedFile = this.getSelectedFile(effectiveChartRoot);
+    // For subcharts (including nested), get the selected file from the root ancestor chart
+    const rootAncestorChart = helmService.getRootAncestorChart(chartContext);
+    const selectedFile = this.getSelectedFile(rootAncestorChart.chartRoot);
 
     // Build status bar text with subchart indicator
     let statusText: string;
     let tooltipText: string;
 
     if (chartContext.isSubchart && chartContext.parentChart) {
-      const parentName = path.basename(chartContext.parentChart.chartRoot);
-      const subchartName = chartContext.subchartName || path.basename(chartContext.chartRoot);
+      // Build the full path and abbreviated path for nested subcharts
+      const { abbreviatedPath, fullPath } = this.buildSubchartPathDisplay(chartContext);
 
       if (selectedFile) {
         const fileName = path.basename(selectedFile);
-        statusText = `$(package) ${subchartName} > $(file-code) ${fileName}`;
-        tooltipText = `Parent: ${parentName}\nSubchart: ${subchartName}\nValues: ${fileName}\n\nClick to select values override file`;
+        statusText = `$(package) ${abbreviatedPath} > $(file-code) ${fileName}`;
+        tooltipText = `Chart path: ${fullPath}\nValues: ${fileName}\n\nClick to select values override file`;
       } else {
-        statusText = `$(package) ${subchartName} > $(file-code) None`;
-        tooltipText = `Parent: ${parentName}\nSubchart: ${subchartName}\nValues: None (using defaults)\n\nClick to select values override file`;
+        statusText = `$(package) ${abbreviatedPath} > $(file-code) None`;
+        tooltipText = `Chart path: ${fullPath}\nValues: None (using defaults)\n\nClick to select values override file`;
       }
     } else {
       if (selectedFile) {
@@ -135,6 +133,43 @@ export class StatusBarProvider {
     this.statusBarItem.text = statusText;
     this.statusBarItem.tooltip = tooltipText;
     this.statusBarItem.show();
+  }
+
+  /**
+   * Build display paths for nested subcharts.
+   * Returns both abbreviated (for status bar) and full (for tooltip) paths.
+   * For deeply nested charts, abbreviates with "..." prefix.
+   */
+  private buildSubchartPathDisplay(chartContext: HelmChartContext): {
+    abbreviatedPath: string;
+    fullPath: string;
+  } {
+    const helmService = HelmChartService.getInstance();
+    const chain = helmService.buildAncestorChain(chartContext);
+
+    // Build full path: rootName/parentName/childName
+    const pathParts: string[] = [];
+    for (const { chart, subchartKey } of chain) {
+      if (subchartKey) {
+        pathParts.push(subchartKey);
+      } else {
+        pathParts.push(path.basename(chart.chartRoot));
+      }
+    }
+    const fullPath = pathParts.join('/');
+
+    // Build abbreviated path for status bar
+    // If more than 2 levels, show "...parent/leaf"
+    let abbreviatedPath: string;
+    if (pathParts.length <= 2) {
+      abbreviatedPath = pathParts.join('/');
+    } else {
+      // Show last 2 parts with ... prefix
+      const lastTwo = pathParts.slice(-2);
+      abbreviatedPath = `...${lastTwo.join('/')}`;
+    }
+
+    return { abbreviatedPath, fullPath };
   }
 
   /**
@@ -160,16 +195,16 @@ export class StatusBarProvider {
       this.currentChartContext = chartContext;
     }
 
-    // For subcharts, use the parent chart's values files
+    // For subcharts (including nested), use the root ancestor chart's values files
+    const helmService = HelmChartService.getInstance();
     const effectiveChartContext = chartContext.isSubchart && chartContext.parentChart
-      ? chartContext.parentChart
+      ? helmService.getRootAncestorChart(chartContext)
       : chartContext;
 
-    const helmService = HelmChartService.getInstance();
     const valuesFiles = await helmService.findValuesFiles(effectiveChartContext.chartRoot);
 
     if (valuesFiles.length === 0) {
-      const contextLabel = chartContext.isSubchart ? 'parent chart' : 'chart';
+      const contextLabel = chartContext.isSubchart ? 'root ancestor chart' : 'chart';
       vscode.window.showInformationMessage(`No values override files found in ${contextLabel}`);
       return;
     }
@@ -179,7 +214,7 @@ export class StatusBarProvider {
 
     // Add description for subcharts
     const subchartNote = chartContext.isSubchart
-      ? ` (from parent ${path.basename(effectiveChartContext.chartRoot)})`
+      ? ` (from root ${path.basename(effectiveChartContext.chartRoot)})`
       : '';
 
     // Add "None" option

@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-grandparent
+  labels:
+    app: grandparent
+    environment: {{ .Values.global.environment }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: grandparent
+  template:
+    metadata:
+      labels:
+        app: grandparent
+    spec:
+      containers:
+        - name: grandparent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

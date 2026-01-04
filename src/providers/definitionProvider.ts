@@ -59,23 +59,20 @@ export class HelmDefinitionProvider implements vscode.DefinitionProvider {
     switch (reference.objectType) {
       case 'Values': {
         // Get the selected values file
-        // For subcharts, use the parent chart's selected file
+        // For subcharts (including nested), use the root ancestor chart's selected file
         const statusBarProvider = StatusBarProvider.getInstance();
-        const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
-          ? chartContext.parentChart.chartRoot
-          : chartContext.chartRoot;
-        const selectedFile = statusBarProvider?.getSelectedFile(effectiveChartRoot) || '';
+        const helmService = HelmChartService.getInstance();
+        const rootChart = helmService.getRootAncestorChart(chartContext);
+        const selectedFile = statusBarProvider?.getSelectedFile(rootChart.chartRoot) || '';
 
         // Find the position of the value definition
         const valuesCache = ValuesCache.getInstance();
         let valuePosition;
 
         if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
-          // For subcharts, find in parent's values (under subchart key) or subchart's own values
-          valuePosition = await valuesCache.findSubchartValuePositionInChain(
-            chartContext.parentChart.chartRoot,
-            chartContext.chartRoot,
-            chartContext.subchartName,
+          // For subcharts (including nested), use the new nested method
+          valuePosition = await valuesCache.findSubchartValuePositionInChainNested(
+            chartContext,
             selectedFile,
             reference.path
           );

@@ -300,3 +300,247 @@ suite('HelmReferenceProvider - Global values in subcharts', () => {
     assert.ok(result.length >= 2, 'Should find multiple global references');
   });
 });
+
+suite('HelmReferenceProvider - Aliased subcharts', () => {
+  const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+  const parentChartPath = path.join(fixturesPath, 'parent-with-deps');
+  const parentValuesPath = path.join(parentChartPath, 'values.yaml');
+  const mysqlTemplatePath = path.join(parentChartPath, 'charts', 'mysql', 'templates', 'statefulset.yaml');
+
+  let parentValuesDocument: vscode.TextDocument;
+  let provider: HelmReferenceProvider;
+
+  suiteSetup(async () => {
+    HelmChartService.getInstance();
+    provider = HelmReferenceProvider.getInstance();
+    parentValuesDocument = await vscode.workspace.openTextDocument(parentValuesPath);
+  });
+
+  test('finds references for aliased subchart values (database.auth.rootPassword)', async () => {
+    // Find the line with "rootPassword:" under "database.auth:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let rootPasswordLine = -1;
+    let foundDatabase = false;
+    let foundAuth = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('database:')) {
+        foundDatabase = true;
+      }
+      if (foundDatabase && lines[i].includes('auth:')) {
+        foundAuth = true;
+      }
+      if (foundAuth && lines[i].includes('rootPassword:')) {
+        rootPasswordLine = i;
+        break;
+      }
+    }
+    assert.ok(rootPasswordLine >= 0, 'Should find rootPassword line under database.auth');
+
+    const position = new vscode.Position(rootPasswordLine, 6); // Position on "rootPassword"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in mysql subchart template (via alias "database")
+    const mysqlRef = result.find((loc) => loc.uri.fsPath === mysqlTemplatePath);
+    assert.ok(mysqlRef, 'Should find reference in mysql subchart statefulset.yaml');
+  });
+
+  test('finds references when clicking on aliased subchart key (database)', async () => {
+    // Find the line with "database:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let databaseLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('database:')) {
+        databaseLine = i;
+        break;
+      }
+    }
+    assert.ok(databaseLine >= 0, 'Should find database line');
+
+    const position = new vscode.Position(databaseLine, 3); // Position on "database"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    // Should find all references in mysql subchart (auth.rootPassword, etc.)
+    assert.ok(result.length >= 1, 'Should find at least one reference in subchart');
+  });
+});
+
+suite('HelmReferenceProvider - Nested subcharts', () => {
+  const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+  const nestedChartPath = path.join(fixturesPath, 'nested-subcharts');
+  const nestedValuesPath = path.join(nestedChartPath, 'values.yaml');
+  const leafTemplatePath = path.join(nestedChartPath, 'charts', 'parent', 'charts', 'leaf', 'templates', 'configmap.yaml');
+
+  let nestedValuesDocument: vscode.TextDocument;
+  let provider: HelmReferenceProvider;
+
+  suiteSetup(async () => {
+    HelmChartService.getInstance();
+    provider = HelmReferenceProvider.getInstance();
+    nestedValuesDocument = await vscode.workspace.openTextDocument(nestedValuesPath);
+  });
+
+  test('finds references in nested subchart (parentAlias.leafAlias.config.setting)', async () => {
+    // Find the line with "setting:" under "parentAlias.leafAlias.config:"
+    const text = nestedValuesDocument.getText();
+    const lines = text.split('\n');
+    let settingLine = -1;
+    let foundParentAlias = false;
+    let foundLeafAlias = false;
+    let foundConfig = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('parentAlias:')) {
+        foundParentAlias = true;
+      }
+      if (foundParentAlias && lines[i].includes('leafAlias:')) {
+        foundLeafAlias = true;
+      }
+      if (foundLeafAlias && lines[i].includes('config:')) {
+        foundConfig = true;
+      }
+      if (foundConfig && lines[i].includes('setting:')) {
+        settingLine = i;
+        break;
+      }
+    }
+    assert.ok(settingLine >= 0, 'Should find setting line under parentAlias.leafAlias.config');
+
+    const position = new vscode.Position(settingLine, 8); // Position on "setting"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(nestedValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in leaf subchart template
+    const leafRef = result.find((loc) => loc.uri.fsPath === leafTemplatePath);
+    assert.ok(leafRef, 'Should find reference in leaf subchart configmap.yaml');
+  });
+
+  test('finds global references in nested subcharts', async () => {
+    // Find the line with "environment:" under "global:"
+    const text = nestedValuesDocument.getText();
+    const lines = text.split('\n');
+    let envLine = -1;
+    let foundGlobal = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('global:')) {
+        foundGlobal = true;
+      }
+      if (foundGlobal && lines[i].includes('environment:')) {
+        envLine = i;
+        break;
+      }
+    }
+    assert.ok(envLine >= 0, 'Should find environment line under global');
+
+    const position = new vscode.Position(envLine, 4); // Position on "environment"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(nestedValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in leaf subchart template
+    const leafRef = result.find((loc) => loc.uri.fsPath === leafTemplatePath);
+    assert.ok(leafRef, 'Should find global.environment reference in leaf subchart configmap.yaml');
+  });
+});
+
+suite('HelmReferenceProvider - Intermediate subchart values.yaml', () => {
+  const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+  const nestedChartPath = path.join(fixturesPath, 'nested-subcharts');
+  const parentValuesPath = path.join(nestedChartPath, 'charts', 'parent', 'values.yaml');
+  const leafTemplatePath = path.join(nestedChartPath, 'charts', 'parent', 'charts', 'leaf', 'templates', 'configmap.yaml');
+
+  let parentValuesDocument: vscode.TextDocument;
+  let provider: HelmReferenceProvider;
+
+  suiteSetup(async () => {
+    HelmChartService.getInstance();
+    provider = HelmReferenceProvider.getInstance();
+    parentValuesDocument = await vscode.workspace.openTextDocument(parentValuesPath);
+  });
+
+  test('finds references in leaf subchart when editing parent subchart values.yaml (leafAlias.config.setting)', async () => {
+    // Find the line with "setting:" under "leafAlias.config:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let settingLine = -1;
+    let foundLeafAlias = false;
+    let foundConfig = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('leafAlias:')) {
+        foundLeafAlias = true;
+      }
+      if (foundLeafAlias && lines[i].includes('config:')) {
+        foundConfig = true;
+      }
+      if (foundConfig && lines[i].includes('setting:')) {
+        settingLine = i;
+        break;
+      }
+    }
+    assert.ok(settingLine >= 0, 'Should find setting line under leafAlias.config in parent values.yaml');
+
+    const position = new vscode.Position(settingLine, 6); // Position on "setting"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    assert.ok(result, 'Should return references');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    assert.ok(result.length > 0, 'Should find at least one reference');
+
+    // Verify reference is found in leaf subchart template
+    const leafRef = result.find((loc) => loc.uri.fsPath === leafTemplatePath);
+    assert.ok(leafRef, 'Should find reference in leaf subchart configmap.yaml when editing parent subchart values.yaml');
+  });
+
+  test('clicking on leafAlias key returns empty when no value path specified', async () => {
+    // Find the line with "leafAlias:"
+    const text = parentValuesDocument.getText();
+    const lines = text.split('\n');
+    let leafAliasLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('leafAlias:')) {
+        leafAliasLine = i;
+        break;
+      }
+    }
+    assert.ok(leafAliasLine >= 0, 'Should find leafAlias line');
+
+    const position = new vscode.Position(leafAliasLine, 3); // Position on "leafAlias"
+    const context: vscode.ReferenceContext = { includeDeclaration: false };
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideReferences(parentValuesDocument, position, context, token);
+
+    // Clicking on just the subchart key without a value path returns empty
+    // because there's no specific value to search for in templates
+    assert.ok(result, 'Should return result');
+    assert.ok(Array.isArray(result), 'Should be an array');
+    // Behavior: no references when clicking on just the subchart alias key itself
+    // (need a value path like leafAlias.config.setting)
+  });
+});

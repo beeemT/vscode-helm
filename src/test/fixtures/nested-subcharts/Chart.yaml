@@ -1,0 +1,12 @@
+apiVersion: v2
+name: grandparent
+description: A grandparent Helm chart for testing nested subcharts
+type: application
+version: 1.0.0
+appVersion: "1.0"
+
+dependencies:
+  - name: parent
+    version: "1.0.0"
+    alias: parentAlias
+    condition: parentAlias.enabled

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-leaf-config
+  labels:
+    app: leaf
+    environment: {{ .Values.global.environment }}
+data:
+  # These values should resolve from the grandparent's values.yaml
+  # through the nested path: parentAlias.leafAlias.xxx
+  name: {{ .Values.name }}
+  setting: {{ .Values.config.setting }}
+  timeout: {{ .Values.config.timeout | quote }}
+  maxRetries: {{ .Values.config.maxRetries | default 3 | quote }}
+
+  # Global values should be accessible
+  region: {{ .Values.global.region }}
+  logLevel: {{ .Values.global.logLevel }}

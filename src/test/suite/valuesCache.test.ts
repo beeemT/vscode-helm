@@ -1,6 +1,36 @@
 import * as assert from 'assert';
 import * as path from 'path';
+import { HelmChartContext } from '../../services/helmChartService';
 import { ValuesCache } from '../../services/valuesCache';
+
+/**
+ * Helper to build a mock HelmChartContext for subchart testing
+ */
+function buildSubchartContext(
+  parentChartRoot: string,
+  subchartRoot: string,
+  subchartName: string
+): HelmChartContext {
+  const parentContext: HelmChartContext = {
+    chartRoot: parentChartRoot,
+    chartYamlPath: path.join(parentChartRoot, 'Chart.yaml'),
+    valuesYamlPath: path.join(parentChartRoot, 'values.yaml'),
+    valuesOverrideFiles: [],
+    isSubchart: false,
+    subcharts: [],
+  };
+
+  return {
+    chartRoot: subchartRoot,
+    chartYamlPath: path.join(subchartRoot, 'Chart.yaml'),
+    valuesYamlPath: path.join(subchartRoot, 'values.yaml'),
+    valuesOverrideFiles: [],
+    isSubchart: true,
+    subchartName,
+    parentChart: parentContext,
+    subcharts: [],
+  };
+}
 
 suite('ValuesCache', () => {
   let cache: ValuesCache;
@@ -195,12 +225,12 @@ suite('ValuesCache', () => {
   suite('getValuesForSubchart', () => {
     test('merges subchart defaults with parent values', async () => {
       // Get values for the mysql subchart aliased as "database"
-      const values = await cache.getValuesForSubchart(
+      const subchartContext = buildSubchartContext(
         parentWithDepsPath,
         mysqlSubchartPath,
-        'database', // alias
-        '' // no override file
+        'database' // alias
       );
+      const values = await cache.getValuesForSubchart(subchartContext, ''); // no override file
 
       // Should have parent override for auth.rootPassword
       const auth = values.auth as Record<string, unknown> | undefined;
@@ -212,12 +242,12 @@ suite('ValuesCache', () => {
     });
 
     test('includes global values from parent', async () => {
-      const values = await cache.getValuesForSubchart(
+      const subchartContext = buildSubchartContext(
         parentWithDepsPath,
         mysqlSubchartPath,
-        'database',
-        ''
+        'database'
       );
+      const values = await cache.getValuesForSubchart(subchartContext, '');
 
       // Global values should be accessible as .Values.global
       const global = values.global as Record<string, unknown> | undefined;
@@ -228,12 +258,12 @@ suite('ValuesCache', () => {
 
     test('applies parent override file values', async () => {
       const overrideFile = path.join(parentWithDepsPath, 'values-prod.yaml');
-      const values = await cache.getValuesForSubchart(
+      const subchartContext = buildSubchartContext(
         parentWithDepsPath,
         mysqlSubchartPath,
-        'database',
-        overrideFile
+        'database'
       );
+      const values = await cache.getValuesForSubchart(subchartContext, overrideFile);
 
       // Should have prod override for auth.rootPassword
       const auth = values.auth as Record<string, unknown> | undefined;
@@ -248,12 +278,12 @@ suite('ValuesCache', () => {
     });
 
     test('works for non-aliased subchart', async () => {
-      const values = await cache.getValuesForSubchart(
+      const subchartContext = buildSubchartContext(
         parentWithDepsPath,
         redisSubchartPath,
-        'redis', // no alias, use directory name
-        ''
+        'redis' // no alias, use directory name
       );
+      const values = await cache.getValuesForSubchart(subchartContext, '');
 
       // Should have parent override for auth.password
       const auth = values.auth as Record<string, unknown> | undefined;
@@ -264,19 +294,14 @@ suite('ValuesCache', () => {
     });
 
     test('caches subchart values', async () => {
+      const subchartContext = buildSubchartContext(
+        parentWithDepsPath,
+        mysqlSubchartPath,
+        'database'
+      );
       // Get values twice
-      const values1 = await cache.getValuesForSubchart(
-        parentWithDepsPath,
-        mysqlSubchartPath,
-        'database',
-        ''
-      );
-      const values2 = await cache.getValuesForSubchart(
-        parentWithDepsPath,
-        mysqlSubchartPath,
-        'database',
-        ''
-      );
+      const values1 = await cache.getValuesForSubchart(subchartContext, '');
+      const values2 = await cache.getValuesForSubchart(subchartContext, '');
 
       // Both should return same values
       assert.deepStrictEqual(values1, values2, 'Cached values should match');
@@ -382,6 +407,202 @@ suite('ValuesCache', () => {
 
       // Should not find this value since it doesn't exist anywhere
       assert.strictEqual(pos, undefined, 'Should not find non-existent global value');
+    });
+  });
+
+  suite('getValuesForSubchart - nested subcharts', () => {
+    // Nested subchart fixture paths
+    const nestedSubchartsPath = path.join(fixturesPath, 'nested-subcharts');
+    const parentSubchartPath = path.join(nestedSubchartsPath, 'charts', 'parent');
+    const leafSubchartPath = path.join(parentSubchartPath, 'charts', 'leaf');
+
+    /**
+     * Build a nested subchart context (grandparent > parent > leaf)
+     */
+    function buildNestedSubchartContext(): HelmChartContext {
+      const grandparentContext: HelmChartContext = {
+        chartRoot: nestedSubchartsPath,
+        chartYamlPath: path.join(nestedSubchartsPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(nestedSubchartsPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: false,
+        subcharts: [],
+      };
+
+      const parentContext: HelmChartContext = {
+        chartRoot: parentSubchartPath,
+        chartYamlPath: path.join(parentSubchartPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(parentSubchartPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: true,
+        subchartName: 'parentAlias',
+        parentChart: grandparentContext,
+        subcharts: [],
+      };
+
+      return {
+        chartRoot: leafSubchartPath,
+        chartYamlPath: path.join(leafSubchartPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(leafSubchartPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: true,
+        subchartName: 'leafAlias',
+        parentChart: parentContext,
+        subcharts: [],
+      };
+    }
+
+    test('resolves values from grandparent for nested subchart', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const values = await cache.getValuesForSubchart(leafContext, '');
+
+      // Values should come from grandparent's values.yaml under parentAlias.leafAlias
+      assert.strictEqual(values.name, 'leaf-from-grandparent', 'Should get name from grandparent');
+      const config = values.config as Record<string, unknown> | undefined;
+      assert.strictEqual(config?.setting, 'grandparent-override', 'Should get config.setting from grandparent');
+      assert.strictEqual(config?.timeout, 60, 'Should get config.timeout from grandparent');
+    });
+
+    test('nested subchart inherits global values from root', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const values = await cache.getValuesForSubchart(leafContext, '');
+
+      // Global values should be accessible from the root chart
+      const global = values.global as Record<string, unknown> | undefined;
+      assert.ok(global, 'Should have global values');
+      assert.strictEqual(global?.environment, 'production', 'Should have global.environment');
+      assert.strictEqual(global?.region, 'us-east-1', 'Should have global.region');
+      assert.strictEqual(global?.logLevel, 'info', 'Should have global.logLevel');
+    });
+
+    test('nested subchart falls back to own defaults when not overridden', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const values = await cache.getValuesForSubchart(leafContext, '');
+
+      // replicaCount is not defined in grandparent's parentAlias.leafAlias section
+      // so it should fall back to leaf's own default
+      assert.strictEqual(values.replicaCount, 1, 'Should fall back to leaf default');
+      const resources = values.resources as Record<string, Record<string, unknown>> | undefined;
+      assert.ok(resources?.limits, 'Should have resources.limits from leaf default');
+    });
+
+    test('nested subchart applies override file from root', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const overrideFile = path.join(nestedSubchartsPath, 'values-prod.yaml');
+      const values = await cache.getValuesForSubchart(leafContext, overrideFile);
+
+      // Override file should override grandparent defaults
+      assert.strictEqual(values.name, 'leaf-prod', 'Should get name from prod override');
+      const config = values.config as Record<string, unknown> | undefined;
+      assert.strictEqual(config?.setting, 'prod-override', 'Should get config.setting from prod override');
+      assert.strictEqual(config?.timeout, 120, 'Should get config.timeout from prod override');
+      assert.strictEqual(config?.maxRetries, 5, 'Should get config.maxRetries from prod override');
+    });
+
+    test('nested subchart override applies global values from override', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const overrideFile = path.join(nestedSubchartsPath, 'values-prod.yaml');
+      const values = await cache.getValuesForSubchart(leafContext, overrideFile);
+
+      // Global values from override file should override root defaults
+      const global = values.global as Record<string, unknown> | undefined;
+      assert.strictEqual(global?.logLevel, 'warn', 'Should have global.logLevel from prod override');
+      assert.strictEqual(global?.environment, 'production', 'Should have global.environment from prod');
+    });
+  });
+
+  suite('findSubchartValuePositionInChainNested', () => {
+    // Nested subchart fixture paths
+    const nestedSubchartsPath = path.join(fixturesPath, 'nested-subcharts');
+    const parentSubchartPath = path.join(nestedSubchartsPath, 'charts', 'parent');
+    const leafSubchartPath = path.join(parentSubchartPath, 'charts', 'leaf');
+
+    /**
+     * Build a nested subchart context (grandparent > parent > leaf)
+     */
+    function buildNestedSubchartContext(): HelmChartContext {
+      const grandparentContext: HelmChartContext = {
+        chartRoot: nestedSubchartsPath,
+        chartYamlPath: path.join(nestedSubchartsPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(nestedSubchartsPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: false,
+        subcharts: [],
+      };
+
+      const parentContext: HelmChartContext = {
+        chartRoot: parentSubchartPath,
+        chartYamlPath: path.join(parentSubchartPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(parentSubchartPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: true,
+        subchartName: 'parentAlias',
+        parentChart: grandparentContext,
+        subcharts: [],
+      };
+
+      return {
+        chartRoot: leafSubchartPath,
+        chartYamlPath: path.join(leafSubchartPath, 'Chart.yaml'),
+        valuesYamlPath: path.join(leafSubchartPath, 'values.yaml'),
+        valuesOverrideFiles: [],
+        isSubchart: true,
+        subchartName: 'leafAlias',
+        parentChart: parentContext,
+        subcharts: [],
+      };
+    }
+
+    test('finds value in root values.yaml under nested path', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const pos = await cache.findSubchartValuePositionInChainNested(
+        leafContext,
+        '', // no override
+        'name'
+      );
+
+      assert.ok(pos, 'Should find position');
+      assert.ok(pos!.filePath.endsWith('nested-subcharts/values.yaml'), 'Should be in root values.yaml');
+      // Note: it's found at parentAlias.leafAlias.name level
+    });
+
+    test('finds value in root override file when selected', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const overrideFile = path.join(nestedSubchartsPath, 'values-prod.yaml');
+      const pos = await cache.findSubchartValuePositionInChainNested(
+        leafContext,
+        overrideFile,
+        'name'
+      );
+
+      assert.ok(pos, 'Should find position');
+      assert.ok(pos!.filePath.endsWith('values-prod.yaml'), 'Should be in override file');
+      assert.strictEqual(pos!.source, 'override', 'Should be marked as override');
+    });
+
+    test('falls back to leaf values.yaml for unoverridden values', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const pos = await cache.findSubchartValuePositionInChainNested(
+        leafContext,
+        '',
+        'replicaCount'
+      );
+
+      assert.ok(pos, 'Should find position');
+      assert.ok(pos!.filePath.endsWith('leaf/values.yaml'), 'Should be in leaf values.yaml');
+      assert.strictEqual(pos!.source, 'default', 'Should be marked as default');
+    });
+
+    test('finds global values at root level', async () => {
+      const leafContext = buildNestedSubchartContext();
+      const pos = await cache.findSubchartValuePositionInChainNested(
+        leafContext,
+        '',
+        'global.environment'
+      );
+
+      assert.ok(pos, 'Should find position for global value');
+      assert.ok(pos!.filePath.endsWith('nested-subcharts/values.yaml'), 'Should be in root values.yaml');
     });
   });
 });

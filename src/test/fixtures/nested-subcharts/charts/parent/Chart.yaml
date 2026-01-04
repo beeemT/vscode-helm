@@ -1,0 +1,12 @@
+apiVersion: v2
+name: parent
+description: A parent subchart containing another subchart
+type: application
+version: 1.0.0
+appVersion: "1.0"
+
+dependencies:
+  - name: leaf
+    version: "1.0.0"
+    alias: leafAlias
+    condition: leafAlias.enabled

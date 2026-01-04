@@ -31,8 +31,9 @@ The extension automatically detects when you're editing templates within a subch
   1. Subchart's own `values.yaml` defaults
   2. Parent chart values under the subchart key (alias or name)
   3. Global values from parent (`global:` section)
-- **Status bar indicator**: Shows which subchart you're editing (e.g., `📦 database > 📄 values-prod.yaml`)
-- **Go-to-definition**: Navigates to value source in parent or subchart values files
+- **Status bar indicator**: Shows which subchart you're editing (e.g., `📦 database > 📄 values-prod.yaml`). For nested subcharts, shows abbreviated path with full path in tooltip
+- **Go-to-definition**: Navigates to value source in parent or subchart values files, following the full ancestor chain for nested subcharts
+- **Find All References**: Works from any values file (root, intermediate subchart, or leaf subchart) to find template usage across the chart hierarchy
 
 **Example**: If your parent chart has:
 ```yaml
@@ -52,7 +53,9 @@ global:
 
 When editing `charts/mysql/templates/deployment.yaml`, `.Values.auth.rootPassword` resolves to `"parent-secret"` and `.Values.global.environment` resolves to `"production"`.
 
-**Note**: Only expanded subchart directories are supported, not `.tgz` archives. Nested subcharts (subcharts within subcharts) are not yet supported.
+**Nested Subcharts**: The extension fully supports nested subcharts (subcharts within subcharts). When editing templates in deeply nested charts, values are resolved following the full ancestor chain with proper alias resolution at each level.
+
+**Note**: Only expanded subchart directories are supported, not `.tgz` archives.
 
 ### Supported Patterns
 

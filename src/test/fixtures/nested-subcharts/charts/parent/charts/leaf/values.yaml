@@ -1,0 +1,15 @@
+# Leaf subchart default values
+enabled: true
+name: leaf-default
+
+config:
+  setting: leaf-default
+  timeout: 10
+  maxRetries: 3
+
+# Local values for leaf
+replicaCount: 1
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi

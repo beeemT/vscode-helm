@@ -1,0 +1,24 @@
+# Global values accessible from all charts
+global:
+  environment: production
+  region: us-east-1
+  logLevel: info
+
+# Values for the parent subchart (under its alias)
+parentAlias:
+  enabled: true
+  name: parent-from-grandparent
+
+  # Values for the leaf subchart (nested under parent)
+  leafAlias:
+    enabled: true
+    name: leaf-from-grandparent
+    config:
+      setting: grandparent-override
+      timeout: 60
+
+# Local values for grandparent
+replicaCount: 3
+image:
+  repository: grandparent-app
+  tag: latest

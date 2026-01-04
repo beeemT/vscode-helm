@@ -161,15 +161,23 @@ export class HelmChartService {
   /**
    * Check if a chart directory is a subchart (inside another chart's charts/ directory).
    * Returns subchart context info including parent chart if found.
+   * Recursively detects nested subcharts with cycle detection.
    */
   private async detectSubchartContext(
     chartRoot: string,
-    _workspaceRoot: string | undefined
+    workspaceRoot: string | undefined,
+    visited: Set<string> = new Set()
   ): Promise<{
     isSubchart: boolean;
     subchartName?: string;
     parentChart?: HelmChartContext;
   }> {
+    // Cycle detection: if we've already visited this chart, stop recursion
+    if (visited.has(chartRoot)) {
+      return { isSubchart: false };
+    }
+    visited.add(chartRoot);
+
     const parentDir = path.dirname(chartRoot);
     const dirName = path.basename(parentDir);
 
@@ -189,18 +197,26 @@ export class HelmChartService {
       const subchartDirName = path.basename(chartRoot);
       const subchartName = await this.resolveSubchartName(potentialParentRoot, subchartDirName);
 
-      // Build parent context (non-recursive to avoid infinite loops)
+      // Build parent context - recursively detect if parent is also a subchart
       const parentValuesYamlPath = path.join(potentialParentRoot, 'values.yaml');
       const parentValuesOverrideFiles = await this.findValuesFiles(potentialParentRoot);
       const parentSubcharts = await this.discoverSubcharts(potentialParentRoot);
 
-      // Check if parent is also a subchart (but don't recurse further for now)
+      // Recursively check if parent is also a subchart (with cycle detection)
+      const parentSubchartInfo = await this.detectSubchartContext(
+        potentialParentRoot,
+        workspaceRoot,
+        visited
+      );
+
       const parentContext: HelmChartContext = {
         chartRoot: potentialParentRoot,
         chartYamlPath: potentialParentChartYaml,
         valuesYamlPath: parentValuesYamlPath,
         valuesOverrideFiles: parentValuesOverrideFiles,
-        isSubchart: false, // We don't support nested subcharts yet
+        isSubchart: parentSubchartInfo.isSubchart,
+        subchartName: parentSubchartInfo.subchartName,
+        parentChart: parentSubchartInfo.parentChart,
         subcharts: parentSubcharts,
       };
 
@@ -300,6 +316,60 @@ export class HelmChartService {
    */
   public getSubchartValuesKey(subchart: SubchartInfo): string {
     return subchart.alias || subchart.name;
+  }
+
+  /**
+   * Get the root ancestor chart in a nested subchart hierarchy.
+   * For a non-subchart, returns the chart itself.
+   * For a subchart, walks up the parent chain to find the root.
+   */
+  public getRootAncestorChart(chartContext: HelmChartContext): HelmChartContext {
+    let current = chartContext;
+    while (current.isSubchart && current.parentChart) {
+      current = current.parentChart;
+    }
+    return current;
+  }
+
+  /**
+   * Build the ancestor chain from root to the given subchart.
+   * Returns an array of { chartContext, subchartKey } pairs from root to leaf.
+   * The first element is the root chart (subchartKey is undefined).
+   * Each subsequent element is a subchart with its key in the parent's values.
+   */
+  public buildAncestorChain(
+    chartContext: HelmChartContext
+  ): Array<{ chart: HelmChartContext; subchartKey?: string }> {
+    // Walk up to root, collecting ancestors
+    const ancestors: Array<{ chart: HelmChartContext; subchartKey?: string }> = [];
+    let current: HelmChartContext | undefined = chartContext;
+
+    while (current) {
+      if (current.isSubchart && current.subchartName) {
+        ancestors.push({ chart: current, subchartKey: current.subchartName });
+      } else {
+        ancestors.push({ chart: current, subchartKey: undefined });
+      }
+      current = current.parentChart;
+    }
+
+    // Reverse to get root-to-leaf order
+    return ancestors.reverse();
+  }
+
+  /**
+   * Build the cache key for a subchart's values, including the full ancestor chain.
+   * Format: rootChartRoot:parent1Key:parent2Key:...:leafKey:overrideFile
+   */
+  public buildSubchartCacheKey(chartContext: HelmChartContext, overrideFile: string): string {
+    const chain = this.buildAncestorChain(chartContext);
+    const keyParts = chain.map((item, index) => {
+      if (index === 0) {
+        return item.chart.chartRoot;
+      }
+      return item.subchartKey || 'unknown';
+    });
+    return `${keyParts.join(':')}:${overrideFile}`;
   }
 
   /**

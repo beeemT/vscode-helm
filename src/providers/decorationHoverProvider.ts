@@ -60,12 +60,10 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     // Get the selected values file (for .Values)
-    // For subcharts, we need to use the parent chart's selected file
+    // For subcharts (including nested), we need to use the root ancestor chart's selected file
     const statusBarProvider = StatusBarProvider.getInstance();
-    const effectiveChartRoot = chartContext.isSubchart && chartContext.parentChart
-      ? chartContext.parentChart.chartRoot
-      : chartContext.chartRoot;
-    const selectedFile = statusBarProvider?.getSelectedFile(effectiveChartRoot) || '';
+    const rootAncestorChart = helmService.getRootAncestorChart(chartContext);
+    const selectedFile = statusBarProvider?.getSelectedFile(rootAncestorChart.chartRoot) || '';
 
     // Get max length from config
     const config = vscode.workspace.getConfiguration('helmValues');
@@ -79,15 +77,10 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
 
     switch (reference.objectType) {
       case 'Values': {
-        // For subcharts, get values as the subchart would see them
+        // For subcharts (including nested), get values as the subchart would see them
         let values: Record<string, unknown>;
         if (chartContext.isSubchart && chartContext.parentChart && chartContext.subchartName) {
-          values = await valuesCache.getValuesForSubchart(
-            chartContext.parentChart.chartRoot,
-            chartContext.chartRoot,
-            chartContext.subchartName,
-            selectedFile
-          );
+          values = await valuesCache.getValuesForSubchart(chartContext, selectedFile);
         } else {
           values = await valuesCache.getValues(chartContext.chartRoot, selectedFile);
         }

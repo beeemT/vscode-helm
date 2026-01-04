@@ -1,0 +1,16 @@
+# Parent subchart default values
+enabled: true
+name: parent-default
+
+# Values for the leaf subchart (under its alias)
+leafAlias:
+  enabled: true
+  name: leaf-from-parent
+  config:
+    setting: parent-default
+    timeout: 30
+
+# Local values for parent
+replicaCount: 2
+service:
+  port: 8080

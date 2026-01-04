@@ -12,6 +12,10 @@ suite('HelmChartService', () => {
   const parentWithDepsPath = path.join(fixturesPath, 'parent-with-deps');
   const mysqlSubchartPath = path.join(parentWithDepsPath, 'charts', 'mysql');
   const redisSubchartPath = path.join(parentWithDepsPath, 'charts', 'redis');
+  // Nested subchart fixture paths
+  const nestedSubchartsPath = path.join(fixturesPath, 'nested-subcharts');
+  const parentSubchartPath = path.join(nestedSubchartsPath, 'charts', 'parent');
+  const leafSubchartPath = path.join(parentSubchartPath, 'charts', 'leaf');
 
   setup(() => {
     service = HelmChartService.getInstance();
@@ -311,6 +315,182 @@ suite('HelmChartService', () => {
       const key = service.getSubchartValuesKey(subchart);
 
       assert.strictEqual(key, 'redis');
+    });
+  });
+
+  suite('nested subchart detection', () => {
+    test('detects nested subchart (2 levels deep)', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+
+      const context = await service.detectHelmChart(uri);
+
+      assert.ok(context, 'Should detect chart context');
+      assert.strictEqual(context!.isSubchart, true, 'Leaf should be identified as subchart');
+      assert.strictEqual(context!.chartRoot, leafSubchartPath, 'Should have correct leaf subchart root');
+      assert.strictEqual(context!.subchartName, 'leafAlias', 'Should resolve alias "leafAlias" for leaf subchart');
+    });
+
+    test('detects parent is also a subchart for nested subcharts', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+
+      const context = await service.detectHelmChart(uri);
+
+      assert.ok(context, 'Should detect chart context');
+      assert.ok(context!.parentChart, 'Should have parent chart context');
+      assert.strictEqual(context!.parentChart!.isSubchart, true, 'Parent should be marked as subchart');
+      assert.strictEqual(context!.parentChart!.subchartName, 'parentAlias', 'Parent should have alias "parentAlias"');
+    });
+
+    test('nested subchart has grandparent context', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+
+      const context = await service.detectHelmChart(uri);
+
+      assert.ok(context, 'Should detect chart context');
+      assert.ok(context!.parentChart, 'Should have parent');
+      assert.ok(context!.parentChart!.parentChart, 'Parent should have grandparent');
+      assert.strictEqual(
+        context!.parentChart!.parentChart!.chartRoot,
+        nestedSubchartsPath,
+        'Grandparent should be the root chart'
+      );
+      assert.strictEqual(
+        context!.parentChart!.parentChart!.isSubchart,
+        false,
+        'Grandparent should not be a subchart'
+      );
+    });
+
+    test('intermediate subchart (parent) correctly detected', async () => {
+      const templatePath = path.join(parentSubchartPath, 'templates', 'service.yaml');
+      const uri = vscode.Uri.file(templatePath);
+
+      const context = await service.detectHelmChart(uri);
+
+      assert.ok(context, 'Should detect chart context');
+      assert.strictEqual(context!.isSubchart, true, 'Parent should be identified as subchart');
+      assert.strictEqual(context!.subchartName, 'parentAlias', 'Should have alias "parentAlias"');
+      assert.ok(context!.parentChart, 'Should have grandparent context');
+      assert.strictEqual(context!.parentChart!.chartRoot, nestedSubchartsPath, 'Grandparent should be root');
+    });
+
+    test('grandparent (root) chart is not marked as subchart', async () => {
+      const templatePath = path.join(nestedSubchartsPath, 'templates', 'deployment.yaml');
+      const uri = vscode.Uri.file(templatePath);
+
+      const context = await service.detectHelmChart(uri);
+
+      assert.ok(context, 'Should detect chart context');
+      assert.strictEqual(context!.isSubchart, false, 'Root should not be marked as subchart');
+      assert.strictEqual(context!.parentChart, undefined, 'Root should not have parent');
+    });
+  });
+
+  suite('getRootAncestorChart', () => {
+    test('returns self for non-subchart', async () => {
+      const templatePath = path.join(nestedSubchartsPath, 'templates', 'deployment.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const root = service.getRootAncestorChart(context!);
+
+      assert.strictEqual(root.chartRoot, nestedSubchartsPath, 'Should return self as root');
+    });
+
+    test('returns root ancestor for nested subchart', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const root = service.getRootAncestorChart(context!);
+
+      assert.strictEqual(root.chartRoot, nestedSubchartsPath, 'Should return grandparent as root');
+      assert.strictEqual(root.isSubchart, false, 'Root should not be a subchart');
+    });
+
+    test('returns root ancestor for single-level subchart', async () => {
+      const templatePath = path.join(parentSubchartPath, 'templates', 'service.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const root = service.getRootAncestorChart(context!);
+
+      assert.strictEqual(root.chartRoot, nestedSubchartsPath, 'Should return grandparent as root');
+    });
+  });
+
+  suite('buildAncestorChain', () => {
+    test('returns single element for non-subchart', async () => {
+      const templatePath = path.join(nestedSubchartsPath, 'templates', 'deployment.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const chain = service.buildAncestorChain(context!);
+
+      assert.strictEqual(chain.length, 1, 'Should have single element');
+      assert.strictEqual(chain[0].chart.chartRoot, nestedSubchartsPath);
+      assert.strictEqual(chain[0].subchartKey, undefined, 'Root should have no subchartKey');
+    });
+
+    test('returns correct chain for nested subchart', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const chain = service.buildAncestorChain(context!);
+
+      assert.strictEqual(chain.length, 3, 'Should have 3 elements: root > parent > leaf');
+      // First element is root (grandparent)
+      assert.strictEqual(chain[0].chart.chartRoot, nestedSubchartsPath);
+      assert.strictEqual(chain[0].subchartKey, undefined);
+      // Second element is parent
+      assert.strictEqual(chain[1].chart.chartRoot, parentSubchartPath);
+      assert.strictEqual(chain[1].subchartKey, 'parentAlias');
+      // Third element is leaf
+      assert.strictEqual(chain[2].chart.chartRoot, leafSubchartPath);
+      assert.strictEqual(chain[2].subchartKey, 'leafAlias');
+    });
+
+    test('returns correct chain for single-level subchart', async () => {
+      const templatePath = path.join(mysqlSubchartPath, 'templates', 'statefulset.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const chain = service.buildAncestorChain(context!);
+
+      assert.strictEqual(chain.length, 2, 'Should have 2 elements: root > subchart');
+      assert.strictEqual(chain[0].chart.chartRoot, parentWithDepsPath);
+      assert.strictEqual(chain[1].subchartKey, 'database');
+    });
+  });
+
+  suite('buildSubchartCacheKey', () => {
+    test('builds key for nested subchart', async () => {
+      const templatePath = path.join(leafSubchartPath, 'templates', 'configmap.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const key = service.buildSubchartCacheKey(context!, 'override.yaml');
+
+      // Should include: rootPath:parentAlias:leafAlias:override.yaml
+      assert.ok(key.includes(nestedSubchartsPath), 'Should include root path');
+      assert.ok(key.includes('parentAlias'), 'Should include parent alias');
+      assert.ok(key.includes('leafAlias'), 'Should include leaf alias');
+      assert.ok(key.includes('override.yaml'), 'Should include override file');
+    });
+
+    test('builds key for single-level subchart', async () => {
+      const templatePath = path.join(mysqlSubchartPath, 'templates', 'statefulset.yaml');
+      const uri = vscode.Uri.file(templatePath);
+      const context = await service.detectHelmChart(uri);
+
+      const key = service.buildSubchartCacheKey(context!, '');
+
+      assert.ok(key.includes(parentWithDepsPath), 'Should include parent path');
+      assert.ok(key.includes('database'), 'Should include alias');
     });
   });
 });
