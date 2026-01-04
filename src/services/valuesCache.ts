@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml';
-import { HelmChartContext, HelmChartService } from './helmChartService';
+import { ArchiveReader } from './archiveReader';
+import { HelmChartContext, HelmChartService, SubchartInfo } from './helmChartService';
 
 /**
  * Cached values data for a Helm chart
@@ -47,6 +48,8 @@ export interface ValuePosition {
   character: number;
   /** Where the value comes from */
   source: ValueSource;
+  /** Whether this value is from an archive subchart (navigation not available) */
+  isFromArchive?: boolean;
 }
 
 /**
@@ -205,6 +208,88 @@ export class ValuesCache {
         console.error(`Failed to parse subchart default values: ${error}`);
       }
     }
+
+    // 2. Get parent's merged values
+    const parentValues = await this.getValues(parentChartRoot, parentOverrideFile);
+
+    // 3. Extract values for this subchart from parent (under subchartKey)
+    const parentSubchartValues = (parentValues[subchartKey] as Record<string, unknown>) || {};
+
+    // 4. Extract global values from parent
+    const globalValues = (parentValues['global'] as Record<string, unknown>) || {};
+
+    // 5. Merge: subchart defaults <- parent subchart values
+    let merged = this.deepMerge(subchartDefaults, parentSubchartValues);
+
+    // 6. Add global values (they should be accessible as .Values.global in subchart)
+    if (Object.keys(globalValues).length > 0) {
+      merged = this.deepMerge(merged, { global: globalValues });
+    }
+
+    // Cache the result
+    this.subchartCache.set(cacheKey, {
+      merged,
+      timestamp: Date.now(),
+      parentOverrideFile,
+    });
+
+    return merged;
+  }
+
+  /**
+   * Load default values for a subchart.
+   * Handles both directory-based and archive-based subcharts.
+   *
+   * @param subchartInfo The subchart info (from discoverSubcharts)
+   * @returns The parsed values.yaml content, or empty object if not found
+   */
+  public async loadSubchartDefaults(subchartInfo: SubchartInfo): Promise<Record<string, unknown>> {
+    if (subchartInfo.isArchive && subchartInfo.archivePath) {
+      // Load from archive
+      const archiveReader = ArchiveReader.getInstance();
+      const values = await archiveReader.extractValuesYaml(subchartInfo.archivePath);
+      return values || {};
+    }
+
+    // Load from directory
+    const helmService = HelmChartService.getInstance();
+    const valuesPath = await helmService.getDefaultValuesPath(subchartInfo.chartRoot);
+    if (!valuesPath) {
+      return {};
+    }
+
+    try {
+      const content = await helmService.readFileContents(valuesPath);
+      return (yaml.load(content) as Record<string, unknown>) || {};
+    } catch (error) {
+      console.error(`Failed to parse subchart default values: ${error}`);
+      return {};
+    }
+  }
+
+  /**
+   * Get values for a subchart by SubchartInfo.
+   * Works with both directory-based and archive-based subcharts.
+   *
+   * @param parentChartRoot The parent chart's root directory
+   * @param subchartInfo The subchart info (from discoverSubcharts)
+   * @param parentOverrideFile Selected override file in parent chart
+   */
+  public async getValuesForSubchartInfo(
+    parentChartRoot: string,
+    subchartInfo: SubchartInfo,
+    parentOverrideFile: string
+  ): Promise<Record<string, unknown>> {
+    const subchartKey = subchartInfo.alias || subchartInfo.name;
+    const cacheKey = `${subchartInfo.chartRoot}:${parentOverrideFile}`;
+
+    const cached = this.subchartCache.get(cacheKey);
+    if (cached && cached.parentOverrideFile === parentOverrideFile) {
+      return cached.merged;
+    }
+
+    // 1. Load subchart's own default values (handles both archives and directories)
+    const subchartDefaults = await this.loadSubchartDefaults(subchartInfo);
 
     // 2. Get parent's merged values
     const parentValues = await this.getValues(parentChartRoot, parentOverrideFile);

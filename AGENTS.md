@@ -77,6 +77,7 @@ src/
 │   ├── referenceProvider.ts        # Find all references from values files
 │   └── statusBarProvider.ts        # Status bar values file selector
 ├── services/
+│   ├── archiveReader.ts            # Read .tgz archive subcharts
 │   ├── helmChartService.ts         # Chart detection + values discovery
 │   ├── templateParser.ts           # Parse .Values references from templates
 │   ├── valuesCache.ts              # Caching layer for parsed values
@@ -194,8 +195,50 @@ Priority order for go-to-definition in nested subcharts:
 - Uses `findGlobalReferencesInAllSubcharts()` to search all nested subcharts for `global.*` references
 - Works when editing intermediate subchart values files by checking `chartContext.subcharts.length > 0` instead of `!chartContext.isSubchart`
 
+### Archive Subchart Support
+
+The extension supports `.tgz` archive subcharts in the `charts/` directory, not just expanded directories.
+
+**Archive Detection (`discoverSubcharts`)**:
+1. Glob pattern `*.tgz` finds archive files in `charts/` directory
+2. `Chart.yaml` is extracted from archive to read chart name
+3. `SubchartInfo` is created with `isArchive: true` and `archivePath` set
+
+**SubchartInfo Extension**:
+```typescript
+interface SubchartInfo {
+  // ... existing fields
+  isArchive?: boolean;      // True if subchart is from .tgz archive
+  archivePath?: string;     // Path to .tgz file
+}
+```
+
+**Archive Reader (`ArchiveReader` service)**:
+- Uses `tar-stream` for streaming extraction (memory efficient)
+- Extracts `Chart.yaml` and `values.yaml` from archives on demand
+- Caches extracted content in memory with mtime-based invalidation
+- Shows VS Code notification for malformed archives
+
+**Value Loading for Archive Subcharts**:
+- `loadSubchartDefaults(subchartInfo)` checks `isArchive` flag
+- For archives: uses `ArchiveReader.extractValuesYaml()`
+- For directories: uses standard file reading
+- `getValuesForSubchartInfo()` provides unified interface
+
+**Archive Cache Invalidation**:
+- `FileWatcher` watches `**/charts/*.tgz` pattern
+- Archive cache invalidated on file change (add/modify/delete)
+- No TTL expiration - only invalidates on actual file changes
+
+**UI Indicators for Archives**:
+- Hover tooltips show 📦 indicator when value comes from archive subchart
+- "📦 from archive" message when navigation is not available
+- Go-to-definition returns `undefined` for archive-sourced values (cannot navigate into archives)
+
 **Limitations**:
-- Only expanded directories supported, not `.tgz` archives
+- Cannot edit templates inside archives (read-only)
+- No line-level navigation into archives (definition/references)
+- Archive must be valid gzipped tar format
 
 ## PR Guidelines
 

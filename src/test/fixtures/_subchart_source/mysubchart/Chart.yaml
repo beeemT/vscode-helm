@@ -1,0 +1,4 @@
+apiVersion: v2
+name: mysubchart
+description: A subchart that will be archived
+version: 1.0.0

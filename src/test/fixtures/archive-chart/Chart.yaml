@@ -1,0 +1,8 @@
+apiVersion: v2
+name: archive-parent
+description: A parent chart with archive subchart
+version: 0.1.0
+dependencies:
+  - name: mysubchart
+    version: 1.0.0
+    alias: archived

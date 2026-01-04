@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { ArchiveReader } from './archiveReader';
 
 /**
  * Represents the context of a detected Helm chart
@@ -28,14 +29,18 @@ export interface HelmChartContext {
  * Information about a subchart discovered in charts/ directory
  */
 export interface SubchartInfo {
-  /** The directory name of the subchart */
+  /** The directory name of the subchart (or archive filename without extension) */
   name: string;
   /** Alias from Chart.yaml dependencies (if any) */
   alias?: string;
-  /** Absolute path to the subchart root */
+  /** Absolute path to the subchart root (directory path or archive path) */
   chartRoot: string;
   /** Condition expression from Chart.yaml (if any) */
   condition?: string;
+  /** Whether this subchart is from a .tgz archive */
+  isArchive?: boolean;
+  /** Absolute path to the archive file (only set if isArchive is true) */
+  archivePath?: string;
 }
 
 /**
@@ -262,7 +267,7 @@ export class HelmChartService {
 
   /**
    * Discover subcharts in the charts/ directory of a chart.
-   * Only discovers expanded directories (not .tgz archives).
+   * Discovers both expanded directories and .tgz archives.
    */
   public async discoverSubcharts(chartRoot: string): Promise<SubchartInfo[]> {
     const subcharts: SubchartInfo[] = [];
@@ -286,7 +291,7 @@ export class HelmChartService {
       // Continue without dependency info
     }
 
-    // Find all Chart.yaml files in charts/*/
+    // Find all Chart.yaml files in charts/*/ (expanded directories)
     const pattern = new vscode.RelativePattern(chartsDir, '*/Chart.yaml');
     const chartFiles = await vscode.workspace.findFiles(pattern);
 
@@ -304,6 +309,32 @@ export class HelmChartService {
         alias: matchingDep?.alias,
         chartRoot: subchartRoot,
         condition: matchingDep?.condition,
+        isArchive: false,
+      });
+    }
+
+    // Find all .tgz archives in charts/
+    const archivePattern = new vscode.RelativePattern(chartsDir, '*.tgz');
+    const archiveFiles = await vscode.workspace.findFiles(archivePattern);
+
+    const archiveReader = ArchiveReader.getInstance();
+    for (const archiveFile of archiveFiles) {
+      const archivePath = archiveFile.fsPath;
+      const chartName = await archiveReader.getChartName(archivePath);
+
+      // Find matching dependency for alias and condition
+      // Dependency name should match the chart name from the archive
+      const matchingDep = dependencies.find(
+        (dep) => dep.name === chartName || dep.alias === chartName
+      );
+
+      subcharts.push({
+        name: chartName,
+        alias: matchingDep?.alias,
+        chartRoot: archivePath, // For archives, chartRoot is the archive path
+        condition: matchingDep?.condition,
+        isArchive: true,
+        archivePath: archivePath,
       });
     }
 

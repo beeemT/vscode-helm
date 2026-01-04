@@ -1,0 +1,8 @@
+replicaCount: 1
+
+archived:
+  setting: "from-parent"
+  port: 9090
+
+global:
+  environment: "test"

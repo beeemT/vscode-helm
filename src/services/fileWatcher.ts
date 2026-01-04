@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { ArchiveReader } from './archiveReader';
 import { HelmChartService } from './helmChartService';
 import { ValuesCache } from './valuesCache';
 
@@ -102,6 +103,97 @@ export class FileWatcher {
 
       this.watchers.push(watcher);
       context.subscriptions.push(watcher);
+    }
+
+    // Watch for .tgz archive changes in charts/ directory
+    this.setupArchiveWatcher(context);
+  }
+
+  /**
+   * Set up watcher for archive subcharts (.tgz files in charts/ directory)
+   */
+  private setupArchiveWatcher(context: vscode.ExtensionContext): void {
+    const archivePattern = '**/charts/*.tgz';
+    const watcher = vscode.workspace.createFileSystemWatcher(archivePattern);
+
+    watcher.onDidChange(async (uri) => {
+      await this.handleArchiveChange(uri);
+    });
+
+    watcher.onDidCreate(async (uri) => {
+      await this.handleArchiveChange(uri);
+    });
+
+    watcher.onDidDelete(async (uri) => {
+      await this.handleArchiveDelete(uri);
+    });
+
+    this.watchers.push(watcher);
+    context.subscriptions.push(watcher);
+  }
+
+  /**
+   * Handle archive file change (content changed or new archive added)
+   */
+  private async handleArchiveChange(uri: vscode.Uri): Promise<void> {
+    const archivePath = uri.fsPath;
+    const chartsDir = path.dirname(archivePath);
+
+    if (path.basename(chartsDir) !== 'charts') {
+      return;
+    }
+
+    const parentChartRoot = path.dirname(chartsDir);
+    const parentChartYaml = path.join(parentChartRoot, 'Chart.yaml');
+
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(parentChartYaml));
+
+      // Invalidate archive cache
+      const archiveReader = ArchiveReader.getInstance();
+      archiveReader.invalidateCache(archivePath);
+
+      // Invalidate parent chart's cache
+      const valuesCache = ValuesCache.getInstance();
+      valuesCache.invalidateCache(parentChartRoot);
+
+      // Notify callbacks
+      this.notifyValuesChanged(parentChartRoot);
+      this.notifyValuesFilesListChanged(parentChartRoot);
+    } catch {
+      // Parent Chart.yaml not found
+    }
+  }
+
+  /**
+   * Handle archive file deletion
+   */
+  private async handleArchiveDelete(uri: vscode.Uri): Promise<void> {
+    const archivePath = uri.fsPath;
+    const chartsDir = path.dirname(archivePath);
+
+    if (path.basename(chartsDir) !== 'charts') {
+      return;
+    }
+
+    const parentChartRoot = path.dirname(chartsDir);
+    const parentChartYaml = path.join(parentChartRoot, 'Chart.yaml');
+
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(parentChartYaml));
+
+      // Invalidate archive cache
+      const archiveReader = ArchiveReader.getInstance();
+      archiveReader.invalidateCache(archivePath);
+
+      // Invalidate parent chart's cache
+      const valuesCache = ValuesCache.getInstance();
+      valuesCache.invalidateCacheImmediate(parentChartRoot);
+
+      // Notify that subcharts list changed
+      this.notifyValuesFilesListChanged(parentChartRoot);
+    } catch {
+      // Parent Chart.yaml not found
     }
   }
 

@@ -605,4 +605,84 @@ suite('ValuesCache', () => {
       assert.ok(pos!.filePath.endsWith('nested-subcharts/values.yaml'), 'Should be in root values.yaml');
     });
   });
+
+  suite('archive subchart values', () => {
+    const archiveChartPath = path.join(fixturesPath, 'archive-chart');
+    const archivePath = path.join(archiveChartPath, 'charts', 'mysubchart-1.0.0.tgz');
+
+    test('loadSubchartDefaults loads values from archive', async () => {
+      const subchartInfo = {
+        name: 'mysubchart',
+        alias: 'archived',
+        chartRoot: archivePath,
+        isArchive: true,
+        archivePath: archivePath,
+      };
+
+      const defaults = await cache.loadSubchartDefaults(subchartInfo);
+
+      assert.ok(defaults, 'Should load defaults');
+      assert.strictEqual(defaults.setting, 'default-from-subchart', 'Should have subchart default value');
+      assert.strictEqual(defaults.port, 8080, 'Should have subchart default port');
+      assert.strictEqual(defaults.enabled, true, 'Should have subchart default enabled');
+    });
+
+    test('getValuesForSubchartInfo merges archive defaults with parent values', async () => {
+      const subchartInfo = {
+        name: 'mysubchart',
+        alias: 'archived',
+        chartRoot: archivePath,
+        isArchive: true,
+        archivePath: archivePath,
+      };
+
+      const values = await cache.getValuesForSubchartInfo(
+        archiveChartPath,
+        subchartInfo,
+        ''
+      );
+
+      // Parent values.yaml overrides archived.setting and archived.port
+      assert.strictEqual(values.setting, 'from-parent', 'Should have parent override for setting');
+      assert.strictEqual(values.port, 9090, 'Should have parent override for port');
+      // enabled is not overridden, should keep subchart default
+      assert.strictEqual(values.enabled, true, 'Should keep subchart default for enabled');
+    });
+
+    test('getValuesForSubchartInfo includes global values from parent', async () => {
+      const subchartInfo = {
+        name: 'mysubchart',
+        alias: 'archived',
+        chartRoot: archivePath,
+        isArchive: true,
+        archivePath: archivePath,
+      };
+
+      const values = await cache.getValuesForSubchartInfo(
+        archiveChartPath,
+        subchartInfo,
+        ''
+      );
+
+      const global = values.global as Record<string, unknown> | undefined;
+      assert.ok(global, 'Should have global values');
+      assert.strictEqual(global?.environment, 'test', 'Should have global.environment from parent');
+    });
+
+    test('loadSubchartDefaults loads values from directory subchart', async () => {
+      const subchartInfo = {
+        name: 'mysql',
+        alias: 'database',
+        chartRoot: mysqlSubchartPath,
+        isArchive: false,
+      };
+
+      const defaults = await cache.loadSubchartDefaults(subchartInfo);
+
+      assert.ok(defaults, 'Should load defaults');
+      assert.ok(defaults.auth, 'Should have mysql auth section');
+      const auth = defaults.auth as Record<string, unknown>;
+      assert.strictEqual(auth.rootPassword, 'default-mysql-root', 'Should have mysql default rootPassword');
+    });
+  });
 });

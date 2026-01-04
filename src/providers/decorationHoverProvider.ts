@@ -186,6 +186,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     const fileName = path.basename(valuePosition.filePath);
+    const archiveIndicator = valuePosition.isFromArchive ? ' 📦' : '';
 
     // For subcharts, add context about where the value comes from
     if (chartContext.isSubchart && chartContext.parentChart) {
@@ -198,11 +199,11 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
 
       switch (valuePosition.source) {
         case 'override':
-          return `\`${fileName}\` (parent chart \`${parentName}\`)`;
+          return `\`${fileName}\` (parent chart \`${parentName}\`)${archiveIndicator}`;
         case 'parent-default':
-          return `\`${fileName}\` (parent chart \`${parentName}\`)`;
+          return `\`${fileName}\` (parent chart \`${parentName}\`)${archiveIndicator}`;
         case 'default':
-          return `\`${fileName}\` (subchart \`${subchartDisplayName}\`)`;
+          return `\`${fileName}\` (subchart \`${subchartDisplayName}\`)${archiveIndicator}`;
         case 'inline-default':
           return 'inline default';
       }
@@ -212,10 +213,10 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     const chartName = path.basename(chartContext.chartRoot);
     switch (valuePosition.source) {
       case 'override':
-        return `\`${fileName}\` (chart \`${chartName}\`)`;
+        return `\`${fileName}\` (chart \`${chartName}\`)${archiveIndicator}`;
       case 'default':
       case 'parent-default':
-        return `\`${fileName}\` (chart \`${chartName}\`)`;
+        return `\`${fileName}\` (chart \`${chartName}\`)${archiveIndicator}`;
       case 'inline-default':
         return 'inline default';
     }
@@ -311,6 +312,17 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     if (valuePosition) {
+      // Check if value is from an archive (no navigation available)
+      if (valuePosition.isFromArchive) {
+        const hoverContent = new vscode.MarkdownString(
+          `**Value:** \`${displayValue}\`\n\n` +
+            `**Path:** \`.Values.${reference.path}\`\n\n` +
+            `**Source:** ${sourceDescription}\n\n` +
+            `*📦 Value is from an archive subchart (navigation not available)*`
+        );
+        return hoverContent;
+      }
+
       const fileUri = vscode.Uri.file(valuePosition.filePath);
       const args = encodeURIComponent(
         JSON.stringify([

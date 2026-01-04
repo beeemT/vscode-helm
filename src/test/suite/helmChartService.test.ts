@@ -300,6 +300,28 @@ suite('HelmChartService', () => {
 
       assert.deepStrictEqual(subcharts, [], 'Should return empty array');
     });
+
+    test('discovers archive subcharts (.tgz files)', async () => {
+      const archiveChartPath = path.join(fixturesPath, 'archive-chart');
+      const subcharts = await service.discoverSubcharts(archiveChartPath);
+
+      assert.ok(subcharts.length >= 1, `Expected at least 1 subchart, got ${subcharts.length}`);
+
+      const archiveSubchart = subcharts.find((s) => s.name === 'mysubchart');
+      assert.ok(archiveSubchart, 'Should find mysubchart from archive');
+      assert.strictEqual(archiveSubchart!.isArchive, true, 'Should be marked as archive');
+      assert.ok(archiveSubchart!.archivePath, 'Should have archive path');
+      assert.ok(archiveSubchart!.archivePath!.endsWith('.tgz'), 'Archive path should end with .tgz');
+    });
+
+    test('resolves alias for archive subcharts from Chart.yaml dependencies', async () => {
+      const archiveChartPath = path.join(fixturesPath, 'archive-chart');
+      const subcharts = await service.discoverSubcharts(archiveChartPath);
+
+      const archiveSubchart = subcharts.find((s) => s.name === 'mysubchart');
+      assert.ok(archiveSubchart, 'Should find mysubchart');
+      assert.strictEqual(archiveSubchart!.alias, 'archived', 'Should have alias from dependencies');
+    });
   });
 
   suite('getSubchartValuesKey', () => {

@@ -84,7 +84,8 @@ export class HelmDefinitionProvider implements vscode.DefinitionProvider {
           );
         }
 
-        if (!valuePosition) {
+        // Return undefined if no position found or if value is from an archive
+        if (!valuePosition || valuePosition.isFromArchive) {
           return undefined;
         }
 
