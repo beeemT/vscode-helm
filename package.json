@@ -39,6 +39,11 @@
                 "command": "helmValues.goToValueDefinition",
                 "title": "Go to Value Definition",
                 "category": "Helm"
+            },
+            {
+                "command": "helmValues.createMissingValue",
+                "title": "Create Missing Value",
+                "category": "Helm"
             }
         ],
         "menus": {
@@ -53,6 +58,10 @@
                 },
                 {
                     "command": "helmValues.goToValueDefinition",
+                    "when": "false"
+                },
+                {
+                    "command": "helmValues.createMissingValue",
                     "when": "false"
                 }
             ]

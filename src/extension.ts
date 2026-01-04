@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { HelmCodeActionProvider, createMissingValueCommand } from './providers/codeActionProvider';
 import { HelmDecorationHoverProvider } from './providers/decorationHoverProvider';
 import { HelmDefinitionProvider } from './providers/definitionProvider';
 import { HelmReferenceProvider } from './providers/referenceProvider';
@@ -85,6 +86,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  // Register code action provider for quick fixes on unset values
+  const codeActionProvider = HelmCodeActionProvider.getInstance();
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      { language: 'yaml', pattern: '**/templates/**' },
+      codeActionProvider,
+      {
+        providedCodeActionKinds: HelmCodeActionProvider.providedCodeActionKinds,
+      }
+    ),
+    vscode.languages.registerCodeActionsProvider(
+      { language: 'helm', pattern: '**/templates/**' },
+      codeActionProvider,
+      {
+        providedCodeActionKinds: HelmCodeActionProvider.providedCodeActionKinds,
+      }
+    )
+  );
+
   // Register go-to-definition command
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -108,6 +128,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           vscode.window.showWarningMessage(`Could not find definition for .Values.${valuePath}`);
         }
       }
+    )
+  );
+
+  // Register command to create missing values in values.yaml
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'helmValues.createMissingValue',
+      createMissingValueCommand
     )
   );
 

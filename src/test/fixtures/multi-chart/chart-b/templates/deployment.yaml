@@ -4,3 +4,4 @@ metadata:
   name: {{ .Values.name }}
 spec:
   replicas: {{ .Values.replicas }}
+  test: {{ .Values.nested.test }}

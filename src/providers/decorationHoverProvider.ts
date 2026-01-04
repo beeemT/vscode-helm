@@ -71,24 +71,44 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     const config = vscode.workspace.getConfiguration('helmValues');
     const maxLength = config.get<number>('inlayHintMaxLength', 50);
 
+    // Check if the value is unset (not in values.yaml or override file, and no default)
+    const isUnset = resolvedValue === undefined && reference.defaultValue === undefined;
+
     // Format the display value
     const displayValue =
       resolvedValue !== undefined
         ? valuesCache.formatValueForDisplay(resolvedValue, maxLength)
         : reference.defaultValue !== undefined
           ? `"${reference.defaultValue}"`
-          : '<undefined>';
+          : '⚠ unset';
 
-    // Find the position of the value definition
-    const valuePosition = await valuesCache.findValuePositionInChain(
-      chartContext.chartRoot,
-      selectedFile,
-      reference.path
-    );
+    // Find the position of the value definition (only if value exists)
+    const valuePosition = isUnset
+      ? undefined
+      : await valuesCache.findValuePositionInChain(
+          chartContext.chartRoot,
+          selectedFile,
+          reference.path
+        );
+
+    // Get default values path for creating missing values
+    const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
 
     // Build hover content
     let hoverContent: vscode.MarkdownString;
-    if (valuePosition) {
+
+    if (isUnset && defaultValuesPath) {
+      // Unset value - show "Create value" link
+      const createArgs = encodeURIComponent(
+        JSON.stringify([defaultValuesPath, reference.path])
+      );
+      hoverContent = new vscode.MarkdownString(
+        `**Value:** \`${displayValue}\`\n\n` +
+          `**Path:** \`.Values.${reference.path}\`\n\n` +
+          `[➕ Create value in values.yaml](command:helmValues.createMissingValue?${createArgs})`
+      );
+      hoverContent.isTrusted = true;
+    } else if (valuePosition) {
       const fileUri = vscode.Uri.file(valuePosition.filePath);
       // Use plain object for selection - vscode.Range doesn't serialize properly
       const args = encodeURIComponent(

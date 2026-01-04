@@ -1,8 +1,22 @@
 import * as vscode from 'vscode';
 import { HelmChartService } from '../services/helmChartService';
-import { TemplateParser } from '../services/templateParser';
+import { TemplateParser, TemplateReference } from '../services/templateParser';
 import { ValuesCache } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
+
+/**
+ * Information about an unset value reference for code actions
+ */
+export interface UnsetValueReference {
+  /** The template reference */
+  reference: TemplateReference;
+  /** The range of the template expression */
+  range: vscode.Range;
+  /** The chart root path */
+  chartRoot: string;
+  /** The path to values.yaml */
+  valuesYamlPath: string;
+}
 
 /**
  * Provider for text decorations showing resolved Helm values.
@@ -12,15 +26,32 @@ import { StatusBarProvider } from './statusBarProvider';
 export class ValuesDecorationProvider {
   private static instance: ValuesDecorationProvider;
   private decorationType: vscode.TextEditorDecorationType;
+  private unsetDecorationType: vscode.TextEditorDecorationType;
   private disposables: vscode.Disposable[] = [];
 
+  /** Map of document URI to unset value references for code actions */
+  private unsetReferences: Map<string, UnsetValueReference[]> = new Map();
+
   private constructor() {
-    // Create decoration type for displaying values
+    // Create decoration type for displaying resolved values
     this.decorationType = vscode.window.createTextEditorDecorationType({
       after: {
         color: new vscode.ThemeColor('editorInlayHint.foreground'),
         backgroundColor: new vscode.ThemeColor('editorInlayHint.background'),
         fontStyle: 'normal',
+        fontWeight: 'normal',
+        margin: '0 0 0 0.5em',
+        border: '1px solid transparent',
+      },
+      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+    });
+
+    // Create decoration type for unset values (warning style)
+    this.unsetDecorationType = vscode.window.createTextEditorDecorationType({
+      after: {
+        color: new vscode.ThemeColor('editorWarning.foreground'),
+        backgroundColor: new vscode.ThemeColor('editorWarning.background'),
+        fontStyle: 'italic',
         fontWeight: 'normal',
         margin: '0 0 0 0.5em',
         border: '1px solid transparent',
@@ -93,18 +124,24 @@ export class ValuesDecorationProvider {
     const config = vscode.workspace.getConfiguration('helmValues');
     if (!config.get<boolean>('enableInlayHints', true)) {
       editor.setDecorations(this.decorationType, []);
+      editor.setDecorations(this.unsetDecorationType, []);
+      this.unsetReferences.delete(editor.document.uri.toString());
       return;
     }
 
     const helmService = HelmChartService.getInstance();
     if (!helmService.isHelmTemplateFile(editor.document.uri)) {
       editor.setDecorations(this.decorationType, []);
+      editor.setDecorations(this.unsetDecorationType, []);
+      this.unsetReferences.delete(editor.document.uri.toString());
       return;
     }
 
     const chartContext = await helmService.detectHelmChart(editor.document.uri);
     if (!chartContext) {
       editor.setDecorations(this.decorationType, []);
+      editor.setDecorations(this.unsetDecorationType, []);
+      this.unsetReferences.delete(editor.document.uri.toString());
       return;
     }
 
@@ -124,40 +161,77 @@ export class ValuesDecorationProvider {
     // Get max length from config
     const maxLength = config.get<number>('inlayHintMaxLength', 50);
 
-    // Build decorations
-    const decorations: vscode.DecorationOptions[] = [];
+    // Build decorations for resolved values
+    const resolvedDecorations: vscode.DecorationOptions[] = [];
+    // Build decorations for unset values
+    const unsetDecorations: vscode.DecorationOptions[] = [];
+    // Track unset references for code actions
+    const documentUnsetRefs: UnsetValueReference[] = [];
+
+    // Get the default values path for unset references
+    const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
 
     for (const ref of references) {
       const resolvedValue = valuesCache.resolveValuePath(values, ref.path);
 
-      // Skip if value is undefined and no default
-      if (resolvedValue === undefined && ref.defaultValue === undefined) {
-        continue;
-      }
-
-      // Use resolved value or default
-      const displayValue =
-        resolvedValue !== undefined
-          ? valuesCache.formatValueForDisplay(resolvedValue, maxLength)
-          : ref.defaultValue !== undefined
-            ? `"${ref.defaultValue}"`
-            : '<undefined>';
-
       // Create position at the end of the template expression for the decoration
       const endPosition = editor.document.positionAt(ref.endOffset);
+      const startPosition = editor.document.positionAt(ref.startOffset);
       const range = new vscode.Range(endPosition, endPosition);
+      const fullRange = new vscode.Range(startPosition, endPosition);
 
-      decorations.push({
-        range,
-        renderOptions: {
-          after: {
-            contentText: ` = ${displayValue}`,
+      if (resolvedValue === undefined && ref.defaultValue === undefined) {
+        // Value is unset - show warning decoration
+        unsetDecorations.push({
+          range,
+          renderOptions: {
+            after: {
+              contentText: ' ⚠ unset',
+            },
           },
-        },
-      });
+        });
+
+        // Track for code actions
+        if (defaultValuesPath) {
+          documentUnsetRefs.push({
+            reference: ref,
+            range: fullRange,
+            chartRoot: chartContext.chartRoot,
+            valuesYamlPath: defaultValuesPath,
+          });
+        }
+      } else {
+        // Value is set - show resolved value
+        const displayValue =
+          resolvedValue !== undefined
+            ? valuesCache.formatValueForDisplay(resolvedValue, maxLength)
+            : ref.defaultValue !== undefined
+              ? `"${ref.defaultValue}"`
+              : '<undefined>';
+
+        resolvedDecorations.push({
+          range,
+          renderOptions: {
+            after: {
+              contentText: ` = ${displayValue}`,
+            },
+          },
+        });
+      }
     }
 
-    editor.setDecorations(this.decorationType, decorations);
+    // Store unset references for code actions
+    this.unsetReferences.set(editor.document.uri.toString(), documentUnsetRefs);
+
+    editor.setDecorations(this.decorationType, resolvedDecorations);
+    editor.setDecorations(this.unsetDecorationType, unsetDecorations);
+  }
+
+  /**
+   * Get unset value references for a document
+   */
+  public getUnsetReferences(documentUri: string): UnsetValueReference[] {
+    return this.unsetReferences.get(documentUri) || [];
   }
 
   /**
@@ -166,7 +240,9 @@ export class ValuesDecorationProvider {
   public clearDecorations(): void {
     for (const editor of vscode.window.visibleTextEditors) {
       editor.setDecorations(this.decorationType, []);
+      editor.setDecorations(this.unsetDecorationType, []);
     }
+    this.unsetReferences.clear();
   }
 
   /**
@@ -174,6 +250,8 @@ export class ValuesDecorationProvider {
    */
   public dispose(): void {
     this.decorationType.dispose();
+    this.unsetDecorationType.dispose();
+    this.unsetReferences.clear();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }

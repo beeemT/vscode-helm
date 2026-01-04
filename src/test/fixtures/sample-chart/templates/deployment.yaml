@@ -35,3 +35,10 @@ spec:
             - name: DEBUG
               value: "true"
           {{- end }}
+          # Example of unset value - will show "⚠ unset" decoration
+          # Quick action will offer to add it to values.yaml
+          {{- if .Values.monitoring.enabled }}
+          annotations:
+            prometheus.io/scrape: "true"
+            monitoring.path: {{ .Values.monitoring.path }}
+          {{- end }}

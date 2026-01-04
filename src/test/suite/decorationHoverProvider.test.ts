@@ -145,4 +145,64 @@ suite('HelmDecorationHoverProvider', () => {
     const result2 = await provider.provideHover(document, pos2, token);
     assert.ok(result2, 'Should return hover at end+1');
   });
+
+  test('hover for unset value shows Create value link', async () => {
+    // Find {{ .Values.monitoring.path }} which is a standalone unset reference
+    const text = document.getText();
+    const match = text.match(/\{\{\s*\.Values\.monitoring\.path\s*\}\}/);
+    assert.ok(match, 'Should find .Values.monitoring.path in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show unset indicator
+    assert.ok(content.value.includes('unset'), 'Should indicate value is unset');
+    // Should show the path
+    assert.ok(
+      content.value.includes('.Values.monitoring.path'),
+      'Should show the full path'
+    );
+    // Should have Create value link
+    assert.ok(
+      content.value.includes('Create value'),
+      'Should include Create value link for unset values'
+    );
+    assert.ok(
+      content.value.includes('helmValues.createMissingValue'),
+      'Should use createMissingValue command'
+    );
+    assert.ok(content.isTrusted, 'MarkdownString should be trusted for command links');
+  });
+
+  test('hover for unset value does not show Go to definition link', async () => {
+    // Find {{ .Values.monitoring.path }} which is a standalone unset reference
+    const text = document.getText();
+    const match = text.match(/\{\{\s*\.Values\.monitoring\.path\s*\}\}/);
+    assert.ok(match, 'Should find .Values.monitoring.path in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should NOT show Go to definition (since there's no definition)
+    assert.ok(
+      !content.value.includes('Go to definition'),
+      'Should not include Go to definition link for unset values'
+    );
+  });
 });
