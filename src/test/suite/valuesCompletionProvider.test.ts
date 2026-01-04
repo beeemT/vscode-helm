@@ -40,7 +40,8 @@ suite('ValuesCompletionProvider', () => {
       assert.strictEqual(result, undefined);
     });
 
-    test('returns undefined for chart without subcharts', async () => {
+    test('returns undefined for default values.yaml in chart without subcharts', async () => {
+      // Default values.yaml should not get completions (nothing to suggest from)
       const valuesPath = path.join(sampleChartPath, 'values.yaml');
       const document = await vscode.workspace.openTextDocument(valuesPath);
       const position = new vscode.Position(0, 0);
@@ -418,6 +419,175 @@ suite('ValuesCompletionProvider', () => {
       assert.ok(
         globalItem!.insertText!.value.includes('\n'),
         'Object keys should have newline in snippet'
+      );
+    });
+  });
+
+  suite('chart values completions in override files', () => {
+    test('suggests chart values keys at root level in override files', async () => {
+      // Use values-dev.yaml which is an override file for sample-chart (no subcharts)
+      const valuesPath = path.join(sampleChartPath, 'values-dev.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions for override file');
+      assert.ok(Array.isArray(result), 'Should be an array');
+
+      // Should suggest keys from values.yaml
+      const replicaCountItem = result.find((item) => item.label === 'replicaCount');
+      assert.ok(replicaCountItem, 'Should suggest replicaCount from values.yaml');
+      assert.strictEqual(
+        replicaCountItem?.kind,
+        vscode.CompletionItemKind.Value,
+        'replicaCount should be Value kind (scalar)'
+      );
+
+      const imageItem = result.find((item) => item.label === 'image');
+      assert.ok(imageItem, 'Should suggest image key from values.yaml');
+      assert.strictEqual(
+        imageItem?.kind,
+        vscode.CompletionItemKind.Property,
+        'image should be Property kind (object)'
+      );
+
+      const serviceItem = result.find((item) => item.label === 'service');
+      assert.ok(serviceItem, 'Should suggest service key from values.yaml');
+
+      const resourcesItem = result.find((item) => item.label === 'resources');
+      assert.ok(resourcesItem, 'Should suggest resources key from values.yaml');
+    });
+
+    test('suggests nested chart values at deeper levels', async () => {
+      const valuesPath = path.join(sampleChartPath, 'values-dev.yaml');
+      const realDocument = await vscode.workspace.openTextDocument(valuesPath);
+
+      // Find position after "image:" line
+      const text = realDocument.getText();
+      const lines = text.split('\n');
+      let imageLineNum = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('image:')) {
+          imageLineNum = i;
+          break;
+        }
+      }
+
+      assert.ok(imageLineNum >= 0, 'Should find image: line');
+
+      // Position on next line (inside image: block)
+      const position = new vscode.Position(imageLineNum + 1, 2);
+
+      const result = await provider.provideCompletionItems(realDocument, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+      assert.ok(Array.isArray(result), 'Should be an array');
+
+      // Should suggest nested keys from values.yaml image section
+      const repositoryItem = result.find((item) => item.label === 'repository');
+      assert.ok(repositoryItem, 'Should suggest repository from image defaults');
+
+      const pullPolicyItem = result.find((item) => item.label === 'pullPolicy');
+      assert.ok(pullPolicyItem, 'Should suggest pullPolicy from image defaults');
+
+      const tagItem = result.find((item) => item.label === 'tag');
+      assert.ok(tagItem, 'Should suggest tag from image defaults');
+    });
+
+    test('suggests chart values alongside subchart keys for charts with subcharts', async () => {
+      // Use values-prod.yaml for parent-with-deps (has subcharts)
+      const valuesPath = path.join(parentWithDepsPath, 'values-prod.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+      assert.ok(Array.isArray(result), 'Should be an array');
+
+      // Should suggest subchart keys
+      const databaseItem = result.find((item) => item.label === 'database');
+      assert.ok(databaseItem, 'Should suggest database (subchart alias)');
+
+      const redisItem = result.find((item) => item.label === 'redis');
+      assert.ok(redisItem, 'Should suggest redis (subchart)');
+
+      // Should also suggest chart's own values
+      const replicaCountItem = result.find((item) => item.label === 'replicaCount');
+      assert.ok(replicaCountItem, 'Should suggest replicaCount from chart values');
+
+      const imageItem = result.find((item) => item.label === 'image');
+      assert.ok(imageItem, 'Should suggest image from chart values');
+
+      // Should suggest global (from subchart support)
+      const globalItem = result.find((item) => item.label === 'global');
+      assert.ok(globalItem, 'Should suggest global key');
+    });
+
+    test('handles prod.values.yaml naming pattern', async () => {
+      const valuesPath = path.join(sampleChartPath, 'prod.values.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions for *.values.yaml pattern');
+
+      const replicaCountItem = result.find((item) => item.label === 'replicaCount');
+      assert.ok(replicaCountItem, 'Should suggest replicaCount from values.yaml');
+    });
+
+    test('handles values/staging.yaml subdirectory pattern', async () => {
+      const valuesPath = path.join(sampleChartPath, 'values', 'staging.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions for values/*.yaml pattern');
+
+      const replicaCountItem = result.find((item) => item.label === 'replicaCount');
+      assert.ok(replicaCountItem, 'Should suggest replicaCount from values.yaml');
+    });
+
+    test('does not duplicate keys already in subchart completions', async () => {
+      const valuesPath = path.join(parentWithDepsPath, 'values-prod.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+
+      // Count occurrences of 'global' - should only appear once
+      const globalOccurrences = result.filter((item) => item.label === 'global');
+      assert.strictEqual(
+        globalOccurrences.length,
+        1,
+        'global should only appear once (not duplicated)'
+      );
+    });
+
+    test('shows default value in completion detail', async () => {
+      const valuesPath = path.join(sampleChartPath, 'values-dev.yaml');
+      const document = await vscode.workspace.openTextDocument(valuesPath);
+      const position = new vscode.Position(0, 0);
+
+      const result = await provider.provideCompletionItems(document, position, token, context);
+
+      assert.ok(result, 'Should return completions');
+
+      const replicaCountItem = result.find((item) => item.label === 'replicaCount');
+      assert.ok(replicaCountItem, 'Should find replicaCount');
+      assert.ok(replicaCountItem?.detail, 'Should have detail');
+      assert.ok(
+        replicaCountItem?.detail?.includes('Default:'),
+        'Detail should show default value'
+      );
+      assert.ok(
+        replicaCountItem?.detail?.includes('1'),
+        'Detail should show the actual default value (1)'
       );
     });
   });

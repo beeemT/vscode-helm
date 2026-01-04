@@ -124,14 +124,6 @@ export class TemplateParser {
   }
 
   /**
-   * Parse template text and extract only .Values references.
-   * This is a convenience method for backward compatibility.
-   */
-  public parseValuesReferences(text: string): TemplateReference[] {
-    return this.parseTemplateReferences(text).filter(ref => ref.objectType === 'Values');
-  }
-
-  /**
    * Parse a values path into individual segments.
    * Handles both dot notation and array indexing.
    *

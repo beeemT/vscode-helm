@@ -460,26 +460,6 @@ export class HelmChartService {
   }
 
   /**
-   * Check if the default values.yaml exists for a chart
-   */
-  public async hasDefaultValues(chartRoot: string): Promise<boolean> {
-    const valuesYamlPath = path.join(chartRoot, 'values.yaml');
-    const valuesYmlPath = path.join(chartRoot, 'values.yml');
-
-    try {
-      await vscode.workspace.fs.stat(vscode.Uri.file(valuesYamlPath));
-      return true;
-    } catch {
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(valuesYmlPath));
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  /**
    * Get the default values file path for a chart
    */
   public async getDefaultValuesPath(chartRoot: string): Promise<string | undefined> {

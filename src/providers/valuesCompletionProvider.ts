@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { HelmChartService, SubchartInfo } from '../services/helmChartService';
 import { ValuesCache } from '../services/valuesCache';
@@ -14,7 +15,9 @@ interface SubchartCompletionItem extends vscode.CompletionItem {
 
 /**
  * Provider for autocompletion in Helm values files.
- * Suggests subchart keys and their nested values based on discovered subcharts.
+ * Suggests:
+ * - Keys from the chart's own values.yaml when editing override files
+ * - Subchart keys and their nested values based on discovered subcharts
  * Works with both expanded directories and .tgz archive subcharts.
  */
 export class ValuesCompletionProvider implements vscode.CompletionItemProvider {
@@ -55,7 +58,12 @@ export class ValuesCompletionProvider implements vscode.CompletionItemProvider {
 
     // Discover subcharts for this chart
     const subcharts = await helmService.discoverSubcharts(chartContext.chartRoot);
-    if (subcharts.length === 0) {
+
+    // Check if this is an override file (not the default values.yaml)
+    const isOverrideFile = this.isOverrideFile(document.uri.fsPath, chartContext.chartRoot);
+
+    // If no subcharts and not an override file, nothing to suggest
+    if (subcharts.length === 0 && !isOverrideFile) {
       return undefined;
     }
 
@@ -66,10 +74,16 @@ export class ValuesCompletionProvider implements vscode.CompletionItemProvider {
     const completions: vscode.CompletionItem[] = [];
 
     if (pathContext.depth === 0) {
-      // At root level - suggest subchart keys and 'global'
-      await this.addRootLevelCompletions(completions, subcharts);
+      // At root level - suggest subchart keys, 'global', and chart values
+      // Add subchart completions first so chart values can avoid duplicates
+      if (subcharts.length > 0) {
+        await this.addRootLevelCompletions(completions, subcharts);
+      }
+      if (isOverrideFile) {
+        await this.addChartValuesCompletions(completions, chartContext.chartRoot, []);
+      }
     } else if (pathContext.path.length > 0) {
-      // Inside a key hierarchy - check if it's a subchart or global path
+      // Inside a key hierarchy - check if it's a subchart, global, or chart values path
       const topLevelKey = pathContext.path[0];
 
       if (topLevelKey === 'global') {
@@ -88,11 +102,38 @@ export class ValuesCompletionProvider implements vscode.CompletionItemProvider {
             matchingSubchart,
             pathContext.path.slice(1)
           );
+        } else if (isOverrideFile) {
+          // Not a subchart key - suggest nested values from chart's own values.yaml
+          await this.addChartValuesCompletions(completions, chartContext.chartRoot, pathContext.path);
         }
       }
     }
 
     return completions.length > 0 ? completions : undefined;
+  }
+
+  /**
+   * Check if a file is an override values file (not the default values.yaml/values.yml)
+   */
+  private isOverrideFile(filePath: string, chartRoot: string): boolean {
+    const fileName = path.basename(filePath);
+    const dir = path.dirname(filePath);
+    const valuesSubdir = path.join(chartRoot, 'values');
+
+    // Default values.yaml or values.yml is not an override file
+    if ((fileName === 'values.yaml' || fileName === 'values.yml') && dir === chartRoot) {
+      return false;
+    }
+
+    // Check if it matches override file patterns
+    // Patterns: values*.yaml, *.values.yaml, *-values.yaml, values.*.yaml, values/*.yaml
+    const isValuesPattern =
+      fileName.startsWith('values') && (fileName.endsWith('.yaml') || fileName.endsWith('.yml'));
+    const isDotValuesPattern = fileName.includes('.values.') && (fileName.endsWith('.yaml') || fileName.endsWith('.yml'));
+    const isDashValuesPattern = fileName.includes('-values.') && (fileName.endsWith('.yaml') || fileName.endsWith('.yml'));
+    const isValuesSubdir = dir === valuesSubdir && (fileName.endsWith('.yaml') || fileName.endsWith('.yml'));
+
+    return isValuesPattern || isDotValuesPattern || isDashValuesPattern || isValuesSubdir;
   }
 
   /**
@@ -245,6 +286,82 @@ export class ValuesCompletionProvider implements vscode.CompletionItemProvider {
       item.documentation = new vscode.MarkdownString(docParts.join('\n'));
       item.insertText = new vscode.SnippetString(`${subchartKey}:\n  $0`);
       item.sortText = `1${subchartKey}`; // Sort after global
+      completions.push(item);
+    }
+  }
+
+  /**
+   * Add completions based on the chart's own values.yaml.
+   * Used when editing override files to suggest available keys.
+   */
+  private async addChartValuesCompletions(
+    completions: vscode.CompletionItem[],
+    chartRoot: string,
+    currentPath: string[]
+  ): Promise<void> {
+    const helmService = HelmChartService.getInstance();
+    const valuesCache = ValuesCache.getInstance();
+
+    // Load the chart's default values
+    const defaultValuesPath = await helmService.getDefaultValuesPath(chartRoot);
+    if (!defaultValuesPath) {
+      return;
+    }
+
+    // Use cache to get default values (with empty override to just get defaults)
+    const defaults = await valuesCache.getValues(chartRoot, '');
+
+    // Navigate to the current position in the defaults
+    let currentObj: Record<string, unknown> = defaults;
+    for (const segment of currentPath) {
+      const value = currentObj[segment];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        currentObj = value as Record<string, unknown>;
+      } else {
+        // Path doesn't exist or leads to non-object - no completions
+        return;
+      }
+    }
+
+    // Get existing keys in completions to avoid duplicates
+    const existingKeys = new Set(completions.map((item) =>
+      typeof item.label === 'string' ? item.label : item.label.label
+    ));
+
+    // Add completions for keys at this level
+    for (const [key, value] of Object.entries(currentObj)) {
+      // Skip if already added (e.g., 'global' or subchart keys at root level)
+      if (existingKeys.has(key)) {
+        continue;
+      }
+
+      const isObject = value && typeof value === 'object' && !Array.isArray(value);
+
+      const item = new vscode.CompletionItem(
+        key,
+        isObject ? vscode.CompletionItemKind.Property : vscode.CompletionItemKind.Value
+      );
+
+      // Format the default value for display
+      const valuePreview = this.formatValuePreview(value);
+      item.detail = `Default: ${valuePreview}`;
+
+      const pathDisplay = currentPath.length > 0 ? `${currentPath.join('.')}.${key}` : key;
+      item.documentation = new vscode.MarkdownString(
+        `Default value from \`values.yaml\` at \`${pathDisplay}\``
+      );
+
+      // Insert with appropriate format
+      if (isObject) {
+        item.insertText = new vscode.SnippetString(`${key}:\n  $0`);
+      } else if (typeof value === 'string') {
+        item.insertText = new vscode.SnippetString(`${key}: "\${1:${value}}"`);
+      } else {
+        item.insertText = new vscode.SnippetString(`${key}: \${1:${value}}`);
+      }
+
+      // Sort after subcharts but before other items
+      item.sortText = `2${key}`;
       completions.push(item);
     }
   }
