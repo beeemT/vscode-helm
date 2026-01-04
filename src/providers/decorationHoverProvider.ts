@@ -1,7 +1,8 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { HelmChartService } from '../services/helmChartService';
 import { TemplateParser } from '../services/templateParser';
-import { ValuesCache } from '../services/valuesCache';
+import { ValuesCache, ValueSource } from '../services/valuesCache';
 import { StatusBarProvider } from './statusBarProvider';
 
 /**
@@ -94,6 +95,19 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     // Get default values path for creating missing values
     const defaultValuesPath = await helmService.getDefaultValuesPath(chartContext.chartRoot);
 
+    // Helper to format source label
+    const formatSourceLabel = (source: ValueSource, filePath: string): string => {
+      const fileName = path.basename(filePath);
+      switch (source) {
+        case 'override':
+          return `\`${fileName}\` (override)`;
+        case 'default':
+          return `\`values.yaml\``;
+        case 'inline-default':
+          return 'inline default';
+      }
+    };
+
     // Build hover content
     let hoverContent: vscode.MarkdownString;
 
@@ -122,12 +136,21 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
           },
         ])
       );
+      const sourceLabel = formatSourceLabel(valuePosition.source, valuePosition.filePath);
       hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
+          `**Source:** ${sourceLabel}\n\n` +
           `[Go to definition](command:vscode.open?${args}) (or Cmd/Ctrl+Click on .Values reference)`
       );
       hoverContent.isTrusted = true;
+    } else if (reference.defaultValue !== undefined) {
+      // Value comes from inline default
+      hoverContent = new vscode.MarkdownString(
+        `**Value:** \`${displayValue}\`\n\n` +
+          `**Path:** \`.Values.${reference.path}\`\n\n` +
+          `**Source:** inline default`
+      );
     } else {
       hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` + `**Path:** \`.Values.${reference.path}\``

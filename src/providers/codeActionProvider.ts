@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { HelmChartService } from '../services/helmChartService';
-import { ValuesDecorationProvider, UnsetValueReference } from './valuesDecorationProvider';
+import { UnsetValueReference, ValuesDecorationProvider } from './valuesDecorationProvider';
 
 /**
  * Code action provider for Helm template files.

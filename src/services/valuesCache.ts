@@ -18,12 +18,19 @@ interface CachedValues {
 }
 
 /**
+ * Source of a resolved value
+ */
+export type ValueSource = 'override' | 'default' | 'inline-default';
+
+/**
  * Position of a value in a YAML file
  */
 export interface ValuePosition {
   filePath: string;
   line: number;
   character: number;
+  /** Where the value comes from */
+  source: ValueSource;
 }
 
 /**
@@ -149,7 +156,8 @@ export class ValuesCache {
    */
   public async findValuePosition(
     filePath: string,
-    valuePath: string
+    valuePath: string,
+    source: ValueSource
   ): Promise<ValuePosition | undefined> {
     try {
       const helmService = HelmChartService.getInstance();
@@ -182,6 +190,7 @@ export class ValuesCache {
                 filePath,
                 line: lineNum,
                 character: indent,
+                source,
               };
             }
             // Move to next segment
@@ -213,7 +222,7 @@ export class ValuesCache {
 
     // Check override file first
     if (selectedOverrideFile) {
-      const overridePos = await this.findValuePosition(selectedOverrideFile, valuePath);
+      const overridePos = await this.findValuePosition(selectedOverrideFile, valuePath, 'override');
       if (overridePos) {
         return overridePos;
       }
@@ -222,7 +231,7 @@ export class ValuesCache {
     // Fall back to default values
     const defaultValuesPath = await helmService.getDefaultValuesPath(chartRoot);
     if (defaultValuesPath) {
-      return this.findValuePosition(defaultValuesPath, valuePath);
+      return this.findValuePosition(defaultValuesPath, valuePath, 'default');
     }
 
     return undefined;

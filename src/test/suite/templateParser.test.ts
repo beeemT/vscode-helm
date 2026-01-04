@@ -118,6 +118,62 @@ suite('TemplateParser', () => {
 
       assert.strictEqual(refs.length, 0);
     });
+
+    test('extracts .Values in if statement', () => {
+      const text = '{{- if .Values.enabled }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'enabled');
+    });
+
+    test('extracts .Values in if statement without dash', () => {
+      const text = '{{ if .Values.debug }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'debug');
+    });
+
+    test('extracts .Values in else if statement', () => {
+      const text = '{{- else if .Values.fallback -}}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'fallback');
+    });
+
+    test('extracts .Values in with statement', () => {
+      const text = '{{ with .Values.config }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'config');
+    });
+
+    test('extracts .Values in range statement', () => {
+      const text = '{{- range .Values.items }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'items');
+    });
+
+    test('extracts nested .Values in if statement', () => {
+      const text = '{{- if .Values.monitoring.enabled }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'monitoring.enabled');
+    });
+
+    test('extracts $.Values in if statement', () => {
+      const text = '{{- if $.Values.global.debug }}';
+      const refs = parser.parseTemplateReferences(text);
+
+      assert.strictEqual(refs.length, 1);
+      assert.strictEqual(refs[0].path, 'global.debug');
+    });
   });
 
   suite('parseValuePath', () => {

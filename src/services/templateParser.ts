@@ -38,19 +38,28 @@ export class TemplateParser {
    * - {{ $.Values.foo }}
    * - {{ .Values.foo | default "bar" }}
    * - {{ .Values.foo | default 123 }}
+   * - {{ if .Values.foo }}
+   * - {{- if .Values.foo -}}
+   * - {{ else if .Values.foo }}
+   * - {{ with .Values.foo }}
+   * - {{ range .Values.items }}
    */
   public parseTemplateReferences(text: string): TemplateReference[] {
     const references: TemplateReference[] = [];
 
-    // Main regex pattern to match .Values and $.Values references
-    // Captures:
-    // 1. The values path (e.g., "image.repository")
-    // 2. Optional default value (string or number)
-    const valuesRegex =
+    // Pattern for standalone .Values expressions (may have | default)
+    // Captures: path, default string (double), default string (single), default number
+    const standaloneRegex =
       /\{\{-?\s*(?:\$)?\.Values\.([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)(?:\s*\|\s*default\s+(?:"([^"]*)"|'([^']*)'|(\d+(?:\.\d+)?)))?\s*-?\}\}/g;
 
+    // Pattern for .Values inside control flow statements (if, else if, with, range, etc.)
+    // Captures: the values path only
+    const controlFlowRegex =
+      /\{\{-?\s*(?:if|else\s+if|with|range|and|or|not)\s+(?:\$)?\.Values\.([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[\d+\])*)\s*-?\}\}/g;
+
+    // Process standalone references
     let match;
-    while ((match = valuesRegex.exec(text)) !== null) {
+    while ((match = standaloneRegex.exec(text)) !== null) {
       const fullMatch = match[0];
       const path = match[1];
       const defaultValue = match[2] ?? match[3] ?? match[4];
@@ -63,6 +72,22 @@ export class TemplateParser {
         defaultValue,
       });
     }
+
+    // Process control flow references
+    while ((match = controlFlowRegex.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const path = match[1];
+
+      references.push({
+        fullMatch,
+        path,
+        startOffset: match.index,
+        endOffset: match.index + fullMatch.length,
+      });
+    }
+
+    // Sort by offset to maintain document order
+    references.sort((a, b) => a.startOffset - b.startOffset);
 
     return references;
   }

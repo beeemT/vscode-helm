@@ -2,7 +2,9 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { HelmDecorationHoverProvider } from '../../providers/decorationHoverProvider';
+import { StatusBarProvider } from '../../providers/statusBarProvider';
 import { HelmChartService } from '../../services/helmChartService';
+import { ValuesCache } from '../../services/valuesCache';
 
 suite('HelmDecorationHoverProvider', () => {
   const fixturesPath = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
@@ -204,5 +206,114 @@ suite('HelmDecorationHoverProvider', () => {
       !content.value.includes('Go to definition'),
       'Should not include Go to definition link for unset values'
     );
+  });
+
+  test('hover shows source as values.yaml for default values', async () => {
+    // Ensure no override file is selected
+    const statusBar = StatusBarProvider.getInstance();
+    statusBar?.setSelectedFile(sampleChartPath, '');
+    ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
+
+    // Find {{ .Values.replicaCount }} which exists in values.yaml
+    const text = document.getText();
+    const match = text.match(/\{\{\s*\.Values\.replicaCount\s*\}\}/);
+    assert.ok(match, 'Should find .Values.replicaCount in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show Source with values.yaml
+    assert.ok(content.value.includes('Source:'), 'Should include Source label');
+    assert.ok(
+      content.value.includes('values.yaml'),
+      'Should indicate source is values.yaml'
+    );
+  });
+
+  test('hover shows source as override file when override is selected', async () => {
+    // Select the prod override file
+    const statusBar = StatusBarProvider.getInstance();
+    const overrideFile = path.join(sampleChartPath, 'values-prod.yaml');
+    statusBar?.setSelectedFile(sampleChartPath, overrideFile);
+    ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
+
+    // Find {{ .Values.replicaCount }} which exists in values-prod.yaml
+    const text = document.getText();
+    const match = text.match(/\{\{\s*\.Values\.replicaCount\s*\}\}/);
+    assert.ok(match, 'Should find .Values.replicaCount in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show Source with override file
+    assert.ok(content.value.includes('Source:'), 'Should include Source label');
+    assert.ok(
+      content.value.includes('values-prod.yaml'),
+      'Should indicate source is values-prod.yaml'
+    );
+    assert.ok(
+      content.value.includes('(override)'),
+      'Should indicate it is an override file'
+    );
+
+    // Clean up: reset to no override
+    statusBar?.setSelectedFile(sampleChartPath, '');
+    ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
+  });
+
+  test('hover shows source as values.yaml when value not in override file', async () => {
+    // Select the prod override file
+    const statusBar = StatusBarProvider.getInstance();
+    const overrideFile = path.join(sampleChartPath, 'values-prod.yaml');
+    statusBar?.setSelectedFile(sampleChartPath, overrideFile);
+    ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
+
+    // Find {{ .Values.image.pullPolicy }} which only exists in values.yaml, not in values-prod.yaml
+    const text = document.getText();
+    const match = text.match(/\{\{\s*\.Values\.image\.pullPolicy\s*\}\}/);
+    assert.ok(match, 'Should find .Values.image.pullPolicy in template');
+
+    const matchIndex = match.index!;
+    const endOffset = matchIndex + match[0].length;
+    const position = document.positionAt(endOffset);
+    const token = new vscode.CancellationTokenSource().token;
+
+    const result = await provider.provideHover(document, position, token);
+
+    assert.ok(result, 'Should return a hover');
+    const hover = result as vscode.Hover;
+    const content = hover.contents[0] as vscode.MarkdownString;
+
+    // Should show Source with values.yaml (not the override, since pullPolicy isn't in prod)
+    assert.ok(content.value.includes('Source:'), 'Should include Source label');
+    assert.ok(
+      content.value.includes('values.yaml'),
+      'Should indicate source is values.yaml when value not in override'
+    );
+    // Should NOT indicate it's an override
+    assert.ok(
+      !content.value.includes('(override)'),
+      'Should not indicate override when value comes from default'
+    );
+
+    // Clean up: reset to no override
+    statusBar?.setSelectedFile(sampleChartPath, '');
+    ValuesCache.getInstance().invalidateCacheImmediate(sampleChartPath);
   });
 });

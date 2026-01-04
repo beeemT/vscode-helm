@@ -2,8 +2,8 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-  calculateYamlInsertion,
-  HelmCodeActionProvider,
+    calculateYamlInsertion,
+    HelmCodeActionProvider,
 } from '../../providers/codeActionProvider';
 import { ValuesDecorationProvider } from '../../providers/valuesDecorationProvider';
 import { HelmChartService } from '../../services/helmChartService';
