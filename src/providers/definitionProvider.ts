@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { HelmChartService } from '../services/helmChartService';
 import { TemplateParser } from '../services/templateParser';
 import { ValuesCache } from '../services/valuesCache';
+import { ArchiveDocumentProvider } from './archiveDocumentProvider';
 import { StatusBarProvider } from './statusBarProvider';
 
 /**
@@ -84,8 +85,29 @@ export class HelmDefinitionProvider implements vscode.DefinitionProvider {
           );
         }
 
-        // Return undefined if no position found or if value is from an archive
-        if (!valuePosition || valuePosition.isFromArchive) {
+        // Return undefined if no position found
+        if (!valuePosition) {
+          return undefined;
+        }
+
+        // For archive-sourced values with known archive location, navigate to archive URI
+        if (
+          valuePosition.isFromArchive &&
+          valuePosition.archivePath &&
+          valuePosition.internalPath
+        ) {
+          const uri = ArchiveDocumentProvider.createUri(
+            valuePosition.archivePath,
+            valuePosition.internalPath
+          );
+          return new vscode.Location(
+            uri,
+            new vscode.Position(valuePosition.line, valuePosition.character)
+          );
+        }
+
+        // For archive values without location info, cannot navigate
+        if (valuePosition.isFromArchive) {
           return undefined;
         }
 

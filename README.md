@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 
-*See resolved template values inline, navigate to definitions, and switch between environments instantly.*
+_See resolved template values inline, navigate to definitions, and switch between environments instantly._
 
 </div>
 
@@ -46,13 +46,13 @@ When a `.Values.*` reference doesn't exist, the extension shows a warning decora
 
 Works seamlessly with Helm dependencies:
 
-| Feature | Description |
-|---------|-------------|
-| **Auto-detection** | Subcharts in `charts/` directory automatically detected |
-| **Alias support** | Dependencies with aliases in `Chart.yaml` properly resolved |
-| **Nested subcharts** | Full support for subcharts within subcharts |
-| **Archive support** | Works with `.tgz` packaged subcharts (read-only) |
-| **Global values** | `global:` section properly inherited |
+| Feature              | Description                                                    |
+| -------------------- | -------------------------------------------------------------- |
+| **Auto-detection**   | Subcharts in `charts/` directory automatically detected        |
+| **Alias support**    | Dependencies with aliases in `Chart.yaml` properly resolved    |
+| **Nested subcharts** | Full support for subcharts within subcharts                    |
+| **Archive support**  | Works with `.tgz` packaged subcharts (read-only introspection) |
+| **Global values**    | `global:` section properly inherited                           |
 
 ### 🎯 Autocomplete for Subchart Values
 
@@ -72,21 +72,22 @@ When editing values files, get intelligent autocomplete suggestions for subchart
 
 ## ⚙️ Configuration
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `helmValues.enableInlayHints` | Enable/disable inline value decorations | `true` |
-| `helmValues.inlayHintMaxLength` | Maximum characters before value is truncated | `50` |
+| Setting                                 | Description                                                                 | Default |
+| --------------------------------------- | --------------------------------------------------------------------------- | ------- |
+| `helmValues.enableInlayHints`           | Enable/disable inline value decorations                                     | `true`  |
+| `helmValues.inlayHintMaxLength`         | Maximum characters before value is truncated                                | `50`    |
+| `helmValues.enableArchiveIntrospection` | Enable go-to-definition and find-references inside `.tgz` archive subcharts | `true`  |
 
 ---
 
 ## 📋 Commands
 
-| Command | Description |
-|---------|-------------|
-| `Helm: Select Values File` | Open the values file picker |
-| `Helm: Clear Values File Selection` | Reset to default `values.yaml` only |
-| `Helm: Go to Value Definition` | Navigate to the value source |
-| `Helm: Create Missing Value` | Add undefined value to `values.yaml` |
+| Command                             | Description                          |
+| ----------------------------------- | ------------------------------------ |
+| `Helm: Select Values File`          | Open the values file picker          |
+| `Helm: Clear Values File Selection` | Reset to default `values.yaml` only  |
+| `Helm: Go to Value Definition`      | Navigate to the value source         |
+| `Helm: Create Missing Value`        | Add undefined value to `values.yaml` |
 
 ---
 
@@ -120,22 +121,23 @@ The extension discovers override files matching these patterns:
 # Chart.yaml
 dependencies:
   - name: mysql
-    version: "1.0.0"
+    version: '1.0.0'
     alias: database
 
 # values.yaml
 database:
   auth:
-    rootPassword: "my-secret"
+    rootPassword: 'my-secret'
 global:
   environment: production
 ```
 
 When editing `charts/mysql/templates/deployment.yaml`:
+
 - `.Values.auth.rootPassword` → `"my-secret"` (from parent)
 - `.Values.global.environment` → `"production"` (inherited global)
 
-Archive subcharts (`.tgz`) are supported for value resolution and autocomplete, but navigation into archives is read-only.
+Archive subcharts (`.tgz`) are fully supported—values resolve, autocomplete works, and you can Cmd/Ctrl+Click to navigate into archive `values.yaml` files as read-only virtual documents.
 
 ---
 

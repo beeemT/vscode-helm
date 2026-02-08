@@ -74,30 +74,33 @@ export class ArchiveReader {
       const files = new Map<string, string>();
       const extract = tar.extract();
 
-      extract.on('entry', (header: Headers, stream: NodeJS.ReadableStream, next: (error?: unknown) => void) => {
-        const chunks: Buffer[] = [];
+      extract.on(
+        'entry',
+        (header: Headers, stream: NodeJS.ReadableStream, next: (error?: unknown) => void) => {
+          const chunks: Buffer[] = [];
 
-        stream.on('data', (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
+          stream.on('data', (chunk: Buffer) => {
+            chunks.push(chunk);
+          });
 
-        stream.on('end', () => {
-          if (header.type === 'file') {
-            const content = Buffer.concat(chunks).toString('utf-8');
-            // Normalize the path - remove leading chart name directory
-            // Archives are structured as: chartname/Chart.yaml, chartname/values.yaml, etc.
-            const normalizedPath = this.normalizeArchivePath(header.name);
-            files.set(normalizedPath, content);
-          }
-          next();
-        });
+          stream.on('end', () => {
+            if (header.type === 'file') {
+              const content = Buffer.concat(chunks).toString('utf-8');
+              // Normalize the path - remove leading chart name directory
+              // Archives are structured as: chartname/Chart.yaml, chartname/values.yaml, etc.
+              const normalizedPath = this.normalizeArchivePath(header.name);
+              files.set(normalizedPath, content);
+            }
+            next();
+          });
 
-        stream.on('error', (err: Error) => {
-          next(err);
-        });
+          stream.on('error', (err: Error) => {
+            next(err);
+          });
 
-        stream.resume();
-      });
+          stream.resume();
+        }
+      );
 
       extract.on('finish', () => {
         resolve(files);
@@ -140,7 +143,10 @@ export class ArchiveReader {
   /**
    * Read a specific file from an archive
    */
-  public async readFileFromArchive(archivePath: string, internalPath: string): Promise<string | undefined> {
+  public async readFileFromArchive(
+    archivePath: string,
+    internalPath: string
+  ): Promise<string | undefined> {
     // Check cache validity
     if (await this.isCacheValid(archivePath)) {
       const cached = this.cache.get(archivePath);
@@ -186,7 +192,9 @@ export class ArchiveReader {
   /**
    * Extract values.yaml from an archive
    */
-  public async extractValuesYaml(archivePath: string): Promise<Record<string, unknown> | undefined> {
+  public async extractValuesYaml(
+    archivePath: string
+  ): Promise<Record<string, unknown> | undefined> {
     // Try values.yaml first, then values.yml
     let content = await this.readFileFromArchive(archivePath, 'values.yaml');
     if (!content) {
@@ -251,6 +259,19 @@ export class ArchiveReader {
    */
   public clearCache(): void {
     this.cache.clear();
+  }
+
+  /**
+   * List all template files in an archive.
+   * Returns paths like "templates/deployment.yaml", "templates/helpers.tpl", etc.
+   */
+  public async listTemplateFiles(archivePath: string): Promise<string[]> {
+    const contents = await this.listArchiveContents(archivePath);
+    return contents.filter(
+      (p) =>
+        p.startsWith('templates/') &&
+        (p.endsWith('.yaml') || p.endsWith('.yml') || p.endsWith('.tpl'))
+    );
   }
 
   /**

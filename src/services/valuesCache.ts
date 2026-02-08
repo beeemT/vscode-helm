@@ -48,8 +48,12 @@ export interface ValuePosition {
   character: number;
   /** Where the value comes from */
   source: ValueSource;
-  /** Whether this value is from an archive subchart (navigation not available) */
+  /** Whether this value is from an archive subchart */
   isFromArchive?: boolean;
+  /** Path to the .tgz archive file (set when isFromArchive is true) */
+  archivePath?: string;
+  /** Path within the archive (e.g., "values.yaml") (set when isFromArchive is true) */
+  internalPath?: string;
 }
 
 /**
@@ -153,8 +157,7 @@ export class ValuesCache {
     // 5. Extract values for this subchart from root (following nested path)
     let ancestorSubchartValues: Record<string, unknown> = rootValues;
     for (const key of keyPath) {
-      ancestorSubchartValues =
-        (ancestorSubchartValues[key] as Record<string, unknown>) || {};
+      ancestorSubchartValues = (ancestorSubchartValues[key] as Record<string, unknown>) || {};
     }
 
     // 6. Extract global values from root
@@ -369,10 +372,7 @@ export class ValuesCache {
   /**
    * Resolve a value path against the cached values
    */
-  public resolveValuePath(
-    values: Record<string, unknown>,
-    path: string
-  ): unknown {
+  public resolveValuePath(values: Record<string, unknown>, path: string): unknown {
     const segments = this.parseValuePath(path);
     let current: unknown = values;
 
@@ -654,6 +654,80 @@ export class ValuesCache {
     const subchartDefaultValuesPath = await helmService.getDefaultValuesPath(subchartRoot);
     if (subchartDefaultValuesPath) {
       return this.findValuePosition(subchartDefaultValuesPath, valuePath, 'default');
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Find the position of a value in an archive's values.yaml file.
+   * Returns a ValuePosition with archivePath and internalPath set for archive navigation.
+   *
+   * @param archivePath Path to the .tgz archive file
+   * @param valuePath The value path to find (e.g., "config.setting")
+   * @param source The value source type
+   */
+  public async findValuePositionInArchive(
+    archivePath: string,
+    valuePath: string,
+    source: ValueSource
+  ): Promise<ValuePosition | undefined> {
+    const archiveReader = ArchiveReader.getInstance();
+
+    // Try values.yaml first, then values.yml
+    let content = await archiveReader.readFileFromArchive(archivePath, 'values.yaml');
+    let internalPath = 'values.yaml';
+    if (!content) {
+      content = await archiveReader.readFileFromArchive(archivePath, 'values.yml');
+      internalPath = 'values.yml';
+    }
+
+    if (!content) {
+      return undefined;
+    }
+
+    const lines = content.split('\n');
+    const segments = valuePath.split('.');
+
+    let currentIndent = -1;
+    let targetSegmentIndex = 0;
+
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+      const line = lines[lineNum];
+      const trimmed = line.trimStart();
+
+      // Skip empty lines and comments
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue;
+      }
+
+      const indent = line.length - trimmed.length;
+      const targetSegment = segments[targetSegmentIndex];
+
+      // Check if this line matches the current target segment
+      if (trimmed.startsWith(targetSegment + ':')) {
+        // Verify indent is correct (deeper than parent)
+        if (currentIndent === -1 || indent > currentIndent) {
+          if (targetSegmentIndex === segments.length - 1) {
+            // Found the target
+            return {
+              filePath: archivePath,
+              line: lineNum,
+              character: indent,
+              source,
+              isFromArchive: true,
+              archivePath,
+              internalPath,
+            };
+          }
+          // Move to next segment
+          targetSegmentIndex++;
+          currentIndent = indent;
+        }
+      } else if (indent <= currentIndent && currentIndent >= 0) {
+        // We've gone back up in the YAML hierarchy, reset search
+        break;
+      }
     }
 
     return undefined;

@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { HelmChartContext, HelmChartService } from '../services/helmChartService';
 import { TemplateParser, TemplateReference } from '../services/templateParser';
 import { ValuesCache } from '../services/valuesCache';
+import { ArchiveDocumentProvider } from './archiveDocumentProvider';
 import { StatusBarProvider } from './statusBarProvider';
 
 /**
@@ -96,25 +97,39 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       }
       case 'Chart': {
         const chartMetadata = await helmService.getChartMetadata(chartContext.chartRoot);
-        resolvedValue = chartMetadata ? valuesCache.resolveValuePath(chartMetadata as Record<string, unknown>, reference.path) : undefined;
+        resolvedValue = chartMetadata
+          ? valuesCache.resolveValuePath(chartMetadata as Record<string, unknown>, reference.path)
+          : undefined;
         sourceDescription = '`Chart.yaml`';
         break;
       }
       case 'Release': {
         const releaseInfo = helmService.getReleaseInfo(chartContext.chartRoot);
-        resolvedValue = valuesCache.resolveValuePath(releaseInfo as unknown as Record<string, unknown>, reference.path);
+        resolvedValue = valuesCache.resolveValuePath(
+          releaseInfo as unknown as Record<string, unknown>,
+          reference.path
+        );
         sourceDescription = 'Release context (runtime)';
         break;
       }
       case 'Capabilities': {
         const capabilities = helmService.getCapabilities();
-        resolvedValue = valuesCache.resolveValuePath(capabilities as Record<string, unknown>, reference.path);
+        resolvedValue = valuesCache.resolveValuePath(
+          capabilities as Record<string, unknown>,
+          reference.path
+        );
         sourceDescription = 'Kubernetes capabilities (runtime)';
         break;
       }
       case 'Template': {
-        const templateInfo = helmService.getTemplateInfo(document.uri.fsPath, chartContext.chartRoot);
-        resolvedValue = valuesCache.resolveValuePath(templateInfo as Record<string, unknown>, reference.path);
+        const templateInfo = helmService.getTemplateInfo(
+          document.uri.fsPath,
+          chartContext.chartRoot
+        );
+        resolvedValue = valuesCache.resolveValuePath(
+          templateInfo as Record<string, unknown>,
+          reference.path
+        );
         sourceDescription = 'Template context';
         break;
       }
@@ -126,7 +141,10 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     // Check if the value is unset (only applies to .Values)
-    const isUnset = reference.objectType === 'Values' && resolvedValue === undefined && reference.defaultValue === undefined;
+    const isUnset =
+      reference.objectType === 'Values' &&
+      resolvedValue === undefined &&
+      reference.defaultValue === undefined;
 
     // Format the display value
     const displayValue =
@@ -193,9 +211,10 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
       const parentName = path.basename(chartContext.parentChart.chartRoot);
       const subchartDirName = path.basename(chartContext.chartRoot);
       // Use alias if different from directory name, otherwise just directory name
-      const subchartDisplayName = chartContext.subchartName && chartContext.subchartName !== subchartDirName
-        ? `${chartContext.subchartName} (${subchartDirName})`
-        : subchartDirName;
+      const subchartDisplayName =
+        chartContext.subchartName && chartContext.subchartName !== subchartDirName
+          ? `${chartContext.subchartName} (${subchartDirName})`
+          : subchartDirName;
 
       switch (valuePosition.source) {
         case 'override':
@@ -249,8 +268,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     // For non-.Values objects, show simple info
-    let content = `**Value:** \`${displayValue}\`\n\n` +
-      `**Path:** \`${pathDisplay}\``;
+    let content = `**Value:** \`${displayValue}\`\n\n` + `**Path:** \`${pathDisplay}\``;
 
     if (sourceDescription) {
       content += `\n\n**Source:** ${sourceDescription}`;
@@ -281,9 +299,7 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
 
     if (isUnset && defaultValuesPath) {
       // Unset value - show "Create value" link
-      const createArgs = encodeURIComponent(
-        JSON.stringify([defaultValuesPath, reference.path])
-      );
+      const createArgs = encodeURIComponent(JSON.stringify([defaultValuesPath, reference.path]));
       const hoverContent = new vscode.MarkdownString(
         `**Value:** \`${displayValue}\`\n\n` +
           `**Path:** \`.Values.${reference.path}\`\n\n` +
@@ -312,8 +328,37 @@ export class HelmDecorationHoverProvider implements vscode.HoverProvider {
     }
 
     if (valuePosition) {
-      // Check if value is from an archive (no navigation available)
+      // Check if value is from an archive
       if (valuePosition.isFromArchive) {
+        if (valuePosition.archivePath && valuePosition.internalPath) {
+          // Archive with navigable location - create link to archive URI
+          const archiveUri = ArchiveDocumentProvider.createUri(
+            valuePosition.archivePath,
+            valuePosition.internalPath
+          );
+          const args = encodeURIComponent(
+            JSON.stringify([
+              archiveUri.toString(),
+              {
+                selection: {
+                  start: { line: valuePosition.line, character: valuePosition.character },
+                  end: { line: valuePosition.line, character: valuePosition.character },
+                },
+              },
+            ])
+          );
+
+          const hoverContent = new vscode.MarkdownString(
+            `**Value:** \`${displayValue}\`\n\n` +
+              `**Path:** \`.Values.${reference.path}\`\n\n` +
+              `**Source:** ${sourceDescription}\n\n` +
+              `[📦 Go to definition (archive)](command:vscode.open?${args})`
+          );
+          hoverContent.isTrusted = true;
+          return hoverContent;
+        }
+
+        // Archive without location info - show non-navigable message
         const hoverContent = new vscode.MarkdownString(
           `**Value:** \`${displayValue}\`\n\n` +
             `**Path:** \`.Values.${reference.path}\`\n\n` +

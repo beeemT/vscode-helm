@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.setting }}
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: app
+          ports:
+            - containerPort: {{ .Values.port }}
+          {{- if .Values.enabled }}
+          readinessProbe:
+            httpGet:
+              port: {{ .Values.port }}
+          {{- end }}
+          env:
+            - name: GLOBAL_ENV
+              value: {{ .Values.global.environment | default "production" }}

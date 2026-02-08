@@ -1,7 +1,9 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { ArchiveReader } from '../services/archiveReader';
 import { HelmChartContext, HelmChartService, SubchartInfo } from '../services/helmChartService';
 import { TemplateParser } from '../services/templateParser';
+import { ArchiveDocumentProvider } from './archiveDocumentProvider';
 
 /**
  * Provider for finding all references to a value key in Helm template files.
@@ -62,11 +64,7 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
       } else {
         // Check if the path starts with a subchart key (alias or name)
         // and recursively search through nested subcharts
-        await this.findReferencesInSubchartChain(
-          chartContext.subcharts,
-          pathSegments,
-          locations
-        );
+        await this.findReferencesInSubchartChain(chartContext.subcharts, pathSegments, locations);
       }
     }
 
@@ -81,23 +79,22 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
     valuePath: string,
     locations: vscode.Location[]
   ): Promise<void> {
-    // Recursively search all subcharts
+    // Recursively search all subcharts (including archives when enabled)
     const searchSubcharts = async (subcharts: SubchartInfo[]): Promise<void> => {
       for (const subchart of subcharts) {
         // Search in this subchart's templates
-        const subchartLocations = await this.findReferencesInSubchartTemplates(
-          subchart.chartRoot,
-          valuePath // global.* paths are accessed the same way in subcharts
-        );
+        const subchartLocations = await this.findReferencesInSubchartTemplates(subchart, valuePath);
         if (subchartLocations && subchartLocations.length > 0) {
           locations.push(...subchartLocations);
         }
 
-        // Discover and search nested subcharts
-        const helmService = HelmChartService.getInstance();
-        const nestedSubcharts = await helmService.discoverSubcharts(subchart.chartRoot);
-        if (nestedSubcharts.length > 0) {
-          await searchSubcharts(nestedSubcharts);
+        // Discover and search nested subcharts (only for directory-based)
+        if (!subchart.isArchive) {
+          const helmService = HelmChartService.getInstance();
+          const nestedSubcharts = await helmService.discoverSubcharts(subchart.chartRoot);
+          if (nestedSubcharts.length > 0) {
+            await searchSubcharts(nestedSubcharts);
+          }
         }
       }
     };
@@ -142,30 +139,30 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
     }
 
     // Check if the next segment is another subchart key (nested subchart)
-    const nestedSubcharts = await helmService.discoverSubcharts(matchingSubchart.chartRoot);
-    const nextKey = remainingSegments[0];
-    const nestedSubchart = nestedSubcharts.find(
-      (sub) => helmService.getSubchartValuesKey(sub) === nextKey
-    );
-
-    if (nestedSubchart && remainingSegments.length > 1) {
-      // Continue down the subchart chain
-      await this.findReferencesInSubchartChain(
-        nestedSubcharts,
-        remainingSegments,
-        locations
+    // Only directory-based subcharts can have nested subcharts
+    if (!matchingSubchart.isArchive) {
+      const nestedSubcharts = await helmService.discoverSubcharts(matchingSubchart.chartRoot);
+      const nextKey = remainingSegments[0];
+      const nestedSubchart = nestedSubcharts.find(
+        (sub) => helmService.getSubchartValuesKey(sub) === nextKey
       );
-    } else {
-      // No more nested subcharts matching - search in current subchart's templates
-      const subchartValuePath = remainingSegments.join('.');
-      if (subchartValuePath) {
-        const subchartLocations = await this.findReferencesInSubchartTemplates(
-          matchingSubchart.chartRoot,
-          subchartValuePath
-        );
-        if (subchartLocations && subchartLocations.length > 0) {
-          locations.push(...subchartLocations);
-        }
+
+      if (nestedSubchart && remainingSegments.length > 1) {
+        // Continue down the subchart chain
+        await this.findReferencesInSubchartChain(nestedSubcharts, remainingSegments, locations);
+        return;
+      }
+    }
+
+    // No more nested subcharts matching - search in current subchart's templates
+    const subchartValuePath = remainingSegments.join('.');
+    if (subchartValuePath) {
+      const subchartLocations = await this.findReferencesInSubchartTemplates(
+        matchingSubchart,
+        subchartValuePath
+      );
+      if (subchartLocations && subchartLocations.length > 0) {
+        locations.push(...subchartLocations);
       }
     }
   }
@@ -261,7 +258,10 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
         // Find references that match the value path
         // Match both exact path and paths that start with valuePath (for nested access)
         for (const ref of references) {
-          if (ref.objectType === 'Values' && (ref.path === valuePath || ref.path.startsWith(valuePath + '.'))) {
+          if (
+            ref.objectType === 'Values' &&
+            (ref.path === valuePath || ref.path.startsWith(valuePath + '.'))
+          ) {
             // Calculate position from offset
             const startPos = document.positionAt(ref.startOffset);
             const endPos = document.positionAt(ref.endOffset);
@@ -279,9 +279,26 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
 
   /**
    * Find references to a value path in a subchart's templates.
-   * Used when the value is defined in parent's values.yaml under a subchart key.
+   * Handles both directory-based and archive-based subcharts.
    */
   private async findReferencesInSubchartTemplates(
+    subchart: SubchartInfo,
+    valuePath: string
+  ): Promise<vscode.Location[]> {
+    if (subchart.isArchive && subchart.archivePath) {
+      if (!this.isArchiveIntrospectionEnabled()) {
+        return [];
+      }
+      return this.findReferencesInArchiveTemplates(subchart.archivePath, valuePath);
+    }
+
+    return this.findReferencesInDirectoryTemplates(subchart.chartRoot, valuePath);
+  }
+
+  /**
+   * Find references in directory-based subchart templates.
+   */
+  private async findReferencesInDirectoryTemplates(
     subchartRoot: string,
     valuePath: string
   ): Promise<vscode.Location[]> {
@@ -302,7 +319,10 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
 
         // Find references that match the value path
         for (const ref of references) {
-          if (ref.objectType === 'Values' && (ref.path === valuePath || ref.path.startsWith(valuePath + '.'))) {
+          if (
+            ref.objectType === 'Values' &&
+            (ref.path === valuePath || ref.path.startsWith(valuePath + '.'))
+          ) {
             const startPos = document.positionAt(ref.startOffset);
             const endPos = document.positionAt(ref.endOffset);
             const range = new vscode.Range(startPos, endPos);
@@ -315,5 +335,58 @@ export class HelmReferenceProvider implements vscode.ReferenceProvider {
     }
 
     return locations;
+  }
+
+  /**
+   * Find references in archive subchart templates.
+   * Uses ArchiveReader to extract and parse template content,
+   * and returns Locations with helm-archive: URIs.
+   */
+  private async findReferencesInArchiveTemplates(
+    archivePath: string,
+    valuePath: string
+  ): Promise<vscode.Location[]> {
+    const locations: vscode.Location[] = [];
+    const archiveReader = ArchiveReader.getInstance();
+    const templateParser = TemplateParser.getInstance();
+
+    const templateFiles = await archiveReader.listTemplateFiles(archivePath);
+
+    for (const templatePath of templateFiles) {
+      const content = await archiveReader.readFileFromArchive(archivePath, templatePath);
+      if (!content) {
+        continue;
+      }
+
+      const references = templateParser.parseTemplateReferences(content);
+      for (const ref of references) {
+        if (
+          ref.objectType === 'Values' &&
+          (ref.path === valuePath || ref.path.startsWith(valuePath + '.'))
+        ) {
+          const position = templateParser.getPositionFromOffset(content, ref.startOffset);
+          const endPosition = templateParser.getPositionFromOffset(content, ref.endOffset);
+          const uri = ArchiveDocumentProvider.createUri(archivePath, templatePath);
+          locations.push(
+            new vscode.Location(
+              uri,
+              new vscode.Range(
+                new vscode.Position(position.line, position.character),
+                new vscode.Position(endPosition.line, endPosition.character)
+              )
+            )
+          );
+        }
+      }
+    }
+
+    return locations;
+  }
+
+  /**
+   * Check if archive introspection is enabled in settings.
+   */
+  private isArchiveIntrospectionEnabled(): boolean {
+    return vscode.workspace.getConfiguration('helmValues').get('enableArchiveIntrospection', true);
   }
 }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { ArchiveDocumentProvider } from './providers/archiveDocumentProvider';
 import { HelmCodeActionProvider, createMissingValueCommand } from './providers/codeActionProvider';
 import { HelmDecorationHoverProvider } from './providers/decorationHoverProvider';
 import { HelmDefinitionProvider } from './providers/definitionProvider';
@@ -36,6 +37,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Initialize decoration provider for instant visual updates
   decorationProvider = ValuesDecorationProvider.initialize();
+
+  // Register archive document provider for viewing files inside .tgz archives
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      ArchiveDocumentProvider.scheme,
+      ArchiveDocumentProvider.getInstance()
+    )
+  );
 
   // Register hover provider for decoration tooltips
   // Responds to positions at the end of template expressions (where decorations appear)
@@ -104,7 +113,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.languages.registerCompletionItemProvider(
         { language: 'yaml', pattern },
         completionProvider,
-        '\n', ':', ' '
+        '\n',
+        ':',
+        ' '
       )
     );
   }
@@ -135,19 +146,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'helmValues.goToValueDefinition',
       async (valuePath: string, chartRoot: string, selectedFile: string) => {
         const cache = ValuesCache.getInstance();
-        const position = await cache.findValuePositionInChain(
-          chartRoot,
-          selectedFile,
-          valuePath
-        );
+        const position = await cache.findValuePositionInChain(chartRoot, selectedFile, valuePath);
 
         if (position) {
-          const uri = vscode.Uri.file(position.filePath);
-          const pos = new vscode.Position(position.line, position.character);
-          const doc = await vscode.workspace.openTextDocument(uri);
-          await vscode.window.showTextDocument(doc, {
-            selection: new vscode.Range(pos, pos),
-          });
+          // Handle archive-sourced values with navigable archive location
+          if (position.isFromArchive && position.archivePath && position.internalPath) {
+            const uri = ArchiveDocumentProvider.createUri(
+              position.archivePath,
+              position.internalPath
+            );
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const pos = new vscode.Position(position.line, position.character);
+            await vscode.window.showTextDocument(doc, {
+              selection: new vscode.Range(pos, pos),
+            });
+          } else if (!position.isFromArchive) {
+            const uri = vscode.Uri.file(position.filePath);
+            const pos = new vscode.Position(position.line, position.character);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc, {
+              selection: new vscode.Range(pos, pos),
+            });
+          } else {
+            vscode.window.showInformationMessage(
+              `Value .Values.${valuePath} is from an archive subchart (read-only).`
+            );
+          }
         } else {
           vscode.window.showWarningMessage(`Could not find definition for .Values.${valuePath}`);
         }
@@ -157,10 +181,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Register command to create missing values in values.yaml
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'helmValues.createMissingValue',
-      createMissingValueCommand
-    )
+    vscode.commands.registerCommand('helmValues.createMissingValue', createMissingValueCommand)
   );
 
   // Listen for values file changes
