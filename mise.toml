@@ -1,0 +1,8 @@
+[tasks.install]
+description = "Install dependencies"
+run = "npm install"
+
+[tasks.release]
+description = "Build a VSIX release for the current version"
+run = "npx @vscode/vsce package"
+depends = ["install"]
