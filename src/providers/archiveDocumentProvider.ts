@@ -6,7 +6,11 @@ import { ArchiveReader } from '../services/archiveReader';
  * Registers a `helm-archive:` URI scheme so VS Code can open read-only views
  * of files extracted from archive subcharts.
  *
- * URI format: helm-archive://<encodedArchivePath>?file=<encodedInternalPath>
+ * URI format: helm-archive://<encodedArchivePath>/<internalPath>
+ *
+ * The internal path is placed in the URI's path component so that VS Code can
+ * infer the language mode from the file extension (e.g., `.yaml` → YAML
+ * syntax highlighting). The archive filesystem path is encoded in the authority.
  */
 export class ArchiveDocumentProvider implements vscode.TextDocumentContentProvider {
   static readonly scheme = 'helm-archive';
@@ -29,8 +33,13 @@ export class ArchiveDocumentProvider implements vscode.TextDocumentContentProvid
    * @param internalPath Path within the archive (e.g., "templates/deployment.yaml")
    */
   static createUri(archivePath: string, internalPath: string): vscode.Uri {
+    // Place the internal path in the URI's path component so VS Code can infer
+    // the language from the file extension (e.g. .yaml → YAML highlighting).
+    const normalizedInternal = internalPath.startsWith('/')
+      ? internalPath
+      : `/${internalPath}`;
     return vscode.Uri.parse(
-      `${this.scheme}://${encodeURIComponent(archivePath)}?file=${encodeURIComponent(internalPath)}`
+      `${this.scheme}://${encodeURIComponent(archivePath)}${normalizedInternal}`
     );
   }
 
@@ -43,8 +52,7 @@ export class ArchiveDocumentProvider implements vscode.TextDocumentContentProvid
     }
 
     const archivePath = decodeURIComponent(uri.authority);
-    const params = new URLSearchParams(uri.query);
-    const internalPath = params.get('file');
+    const internalPath = uri.path.startsWith('/') ? uri.path.slice(1) : uri.path;
 
     if (!archivePath || !internalPath) {
       return undefined;

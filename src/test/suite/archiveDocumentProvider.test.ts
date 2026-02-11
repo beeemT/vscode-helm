@@ -18,14 +18,13 @@ suite('ArchiveDocumentProvider', () => {
       assert.strictEqual(decodeURIComponent(uri.authority), archivePath);
     });
 
-    test('encodes internal path in query', () => {
+    test('places internal path in URI path component', () => {
       const uri = ArchiveDocumentProvider.createUri(
         '/path/to/chart.tgz',
         'templates/deployment.yaml'
       );
-      const params = new URLSearchParams(uri.query);
 
-      assert.strictEqual(params.get('file'), 'templates/deployment.yaml');
+      assert.strictEqual(uri.path, '/templates/deployment.yaml');
     });
 
     test('handles paths with special characters', () => {
@@ -60,8 +59,8 @@ suite('ArchiveDocumentProvider', () => {
       assert.strictEqual(parsed, undefined);
     });
 
-    test('returns undefined for URI without file parameter', () => {
-      const uri = vscode.Uri.parse('helm-archive:///path/to/chart.tgz');
+    test('returns undefined for URI without internal path', () => {
+      const uri = vscode.Uri.parse('helm-archive://encoded-archive-path');
       const parsed = ArchiveDocumentProvider.parseUri(uri);
 
       assert.strictEqual(parsed, undefined);
