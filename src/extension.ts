@@ -73,6 +73,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerDefinitionProvider(
       { language: 'helm', pattern: '**/templates/**' },
       definitionProvider
+    ),
+    // Also register for helm-archive: scheme so Cmd/Ctrl+Click works inside archive documents
+    vscode.languages.registerDefinitionProvider(
+      { scheme: ArchiveDocumentProvider.scheme, language: 'yaml' },
+      definitionProvider
+    ),
+    vscode.languages.registerDefinitionProvider(
+      { scheme: ArchiveDocumentProvider.scheme, language: 'helm' },
+      definitionProvider
     )
   );
 

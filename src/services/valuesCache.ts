@@ -537,12 +537,21 @@ export class ValuesCache {
       }
 
       // Check default values.yaml at this level
-      const defaultValuesPath = await helmService.getDefaultValuesPath(chart.chartRoot);
-      if (defaultValuesPath) {
+      // For archive subcharts at the leaf level, use findValuePositionInArchive
+      if (chart.chartRoot.endsWith('.tgz')) {
         const source: ValueSource = level === chain.length - 1 ? 'default' : 'parent-default';
-        const defaultPos = await this.findValuePosition(defaultValuesPath, fullPath, source);
-        if (defaultPos) {
-          return defaultPos;
+        const archivePos = await this.findValuePositionInArchive(chart.chartRoot, fullPath, source);
+        if (archivePos) {
+          return archivePos;
+        }
+      } else {
+        const defaultValuesPath = await helmService.getDefaultValuesPath(chart.chartRoot);
+        if (defaultValuesPath) {
+          const source: ValueSource = level === chain.length - 1 ? 'default' : 'parent-default';
+          const defaultPos = await this.findValuePosition(defaultValuesPath, fullPath, source);
+          if (defaultPos) {
+            return defaultPos;
+          }
         }
       }
     }
